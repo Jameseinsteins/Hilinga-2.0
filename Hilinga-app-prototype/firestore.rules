@@ -292,6 +292,87 @@ service cloud.firestore {
         && resource.data.ownerUid == request.auth.uid;
     }
 
+    match /businessPostLikes/{likeId} {
+      allow read: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['postId', 'userId', 'createdAt'])
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.postId is string
+        && request.resource.data.postId.size() > 0
+        && request.resource.data.postId.size() <= 160
+        && likeId == request.resource.data.postId + '_' + request.auth.uid
+        && request.resource.data.createdAt == request.time;
+      allow update: if request.auth != null
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasOnly(['postId', 'userId', 'createdAt'])
+        && request.resource.data.postId == resource.data.postId
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.createdAt == request.time;
+      allow delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+    }
+
+    match /businessInquiries/{inquiryId} {
+      allow read: if request.auth != null
+        && (resource.data.businessId == request.auth.uid
+          || resource.data.senderUid == request.auth.uid);
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly([
+          'businessId', 'businessName', 'senderUid', 'senderName',
+          'senderEmail', 'message', 'status', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.senderUid == request.auth.uid
+        && request.resource.data.businessId is string
+        && request.resource.data.businessId.size() > 0
+        && request.resource.data.businessName
+          == get(/databases/$(database)/documents/businesses/$(request.resource.data.businessId)).data.name
+        && request.resource.data.senderName is string
+        && request.resource.data.senderName.size() > 0
+        && request.resource.data.senderName.size() <= 80
+        && request.resource.data.senderEmail is string
+        && request.resource.data.senderEmail.size() <= 160
+        && request.resource.data.senderEmail == request.auth.token.email
+        && request.resource.data.message is string
+        && request.resource.data.message.size() >= 10
+        && request.resource.data.message.size() <= 1500
+        && request.resource.data.status == 'unread'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if request.auth != null
+        && resource.data.businessId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+        && request.resource.data.status in ['unread', 'read']
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if request.auth != null
+        && (resource.data.businessId == request.auth.uid
+          || resource.data.senderUid == request.auth.uid);
+    }
+
+    match /businessProfileViews/{viewId} {
+      allow read: if request.auth != null
+        && resource.data.businessId == request.auth.uid;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly([
+          'businessId', 'businessName', 'viewerUid', 'viewedAt'
+        ])
+        && request.resource.data.viewerUid == request.auth.uid
+        && request.resource.data.businessId is string
+        && request.resource.data.businessId.size() > 0
+        && request.resource.data.businessName
+          == get(/databases/$(database)/documents/businesses/$(request.resource.data.businessId)).data.name
+        && viewId == request.resource.data.businessId + '_' + request.auth.uid
+        && request.resource.data.viewedAt == request.time;
+      allow update: if request.auth != null
+        && resource.data.viewerUid == request.auth.uid
+        && request.resource.data.businessId == resource.data.businessId
+        && request.resource.data.businessName == resource.data.businessName
+        && request.resource.data.viewerUid == resource.data.viewerUid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewedAt'])
+        && request.resource.data.viewedAt == request.time;
+      allow delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

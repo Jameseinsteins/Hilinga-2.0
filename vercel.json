@@ -3,5 +3,13 @@
   "framework": "vite",
   "installCommand": "npm --prefix Hilinga-app-prototype ci",
   "buildCommand": "npm --prefix Hilinga-app-prototype run build",
-  "outputDirectory": "Hilinga-app-prototype/dist"
+  "outputDirectory": "Hilinga-app-prototype/dist",
+  "functions": {
+    "api/itinerary.ts": {
+      "maxDuration": 60
+    },
+    "api/health.ts": {
+      "maxDuration": 10
+    }
+  }
 }

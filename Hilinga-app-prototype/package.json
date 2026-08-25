@@ -4,10 +4,11 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --configLoader runner",
     "build": "tsc -b && vite build --configLoader runner",
     "lint": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
     "typecheck": "tsc --noEmit",
+    "typecheck:api": "tsc -p ../api/tsconfig.json",
     "preview": "vite preview"
   },
   "dependencies": {

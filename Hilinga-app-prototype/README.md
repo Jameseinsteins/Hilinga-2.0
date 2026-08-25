@@ -1,67 +1,51 @@
-# Welcome to your Expo app 👋
+# Hilinga
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Hilinga is a Vite, React, and TypeScript travel companion for Albay. It combines
+trip planning, maps, saved places, community reviews, local-business pages,
+visitor QR check-ins, and a dedicated business dashboard.
 
-## Get started
+## Local development
 
-1. Install dependencies
+From the repository root:
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```sh
+npm install --prefix Hilinga-app-prototype
+npm run dev
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Copy `.env.example` to `.env.local` and add the Firebase web configuration. The
+browser-safe Firebase values identify the project; never put a Firebase service
+account or an OpenAI API key in a `VITE_` variable.
 
-### Other setup steps
+## Backend
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+Firebase Authentication and Cloud Firestore provide the app's durable data and
+real-time subscriptions. The checked-in rules enforce per-user saved data,
+business ownership, QR consent, customer-inquiry access, private feed likes,
+and deduplicated business profile views. IndexedDB keeps saved places and trip
+plans usable while offline and syncs queued changes after reconnection.
 
-## Learn more
+The AI itinerary generator runs in `api/itinerary.ts` as a Vercel Function. It
+requires a Firebase ID token, validates and limits every request, calls OpenAI
+with a strict response schema, and returns safe errors with request IDs. The app
+falls back to its local itinerary generator if that service is unavailable.
 
-To learn more about developing your project with Expo, look at the following resources:
+Configure these server-only variables in Vercel:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
-
-# AI itinerary generation
-
-The planner uses a conversational questionnaire, then calls a server-side Vercel Function to generate a structured itinerary. Add these environment variables to the Vercel project:
-
-```bash
-OPENAI_API_KEY=your_server_side_key
+```text
+FIREBASE_WEB_API_KEY=your_firebase_web_api_key
+OPENAI_API_KEY=your_server_side_openai_key
 OPENAI_ITINERARY_MODEL=gpt-5.6-luna
 ```
 
-`OPENAI_ITINERARY_MODEL` is optional. Never prefix the API key with `VITE_`; doing so would expose it to the browser. When the endpoint or key is unavailable, the planner automatically uses its built-in local itinerary generator.
+See `FIREBASE_SETUP.md` for the complete Firebase and deployment checklist.
+
+## Verification
+
+```sh
+npm run typecheck
+npm run lint
+npm run build
+```
+
+`npm run typecheck` validates both the React app and Vercel API functions.

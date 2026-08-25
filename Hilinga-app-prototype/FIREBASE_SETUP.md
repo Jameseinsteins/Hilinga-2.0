@@ -44,6 +44,15 @@ read and write only their own documents and validate the fields written by the
 app. Avatars are stored below `avatars/{uid}` and are limited to authenticated
 owners, image content, and 25 MB.
 
+Customer engagement is also cloud-backed. Traveler messages are stored in
+`businessInquiries`, feed likes in `businessPostLikes`, and unique signed-in
+profile views in `businessProfileViews`. A traveler can create and read their
+own inquiry, while the destination business can read it and mark it read or
+unread. Likes are private to the user who created them. Profile-view documents
+are deduplicated by business and viewer, so refreshing a page does not inflate
+the business dashboard. Deploy the checked-in Firestore rules before testing
+these features.
+
 On the first signed-in launch after upgrading, Hilinga assigns existing local
 saved places and trip plans to that authenticated account and uploads them. The
 assignment is recorded on the device so the same legacy data is never offered
@@ -80,6 +89,27 @@ the current browser origin for local development. After a valid scan, one visit
 record updates both the business Visitors logbook and the tourist's My Visits
 list in real time. Repeat scans by the same business within 30 minutes are
 treated as duplicates and do not create another visit.
+
+## Vercel backend
+
+The AI planner calls the checked-in Vercel Function with the signed-in user's
+Firebase ID token. The function verifies that token with Firebase before making
+an OpenAI request, strictly validates the payload, applies a per-user burst
+limit, and times out slow upstream calls. Configure these server environment
+variables in Vercel:
+
+```text
+FIREBASE_WEB_API_KEY=the_same_firebase_web_api_key
+OPENAI_API_KEY=your_server_side_openai_key
+OPENAI_ITINERARY_MODEL=gpt-5.6-luna
+```
+
+`FIREBASE_WEB_API_KEY` is an identifier used to verify Firebase sessions, not a
+service-account secret. `OPENAI_API_KEY` must never be exposed through a
+`VITE_` variable. `GET /api/health` provides a small deployment health check.
+For distributed production traffic, add a Vercel Firewall rate-limit rule for
+`/api/itinerary`; the in-function limit is intentionally a second line of
+defense for each warm function instance.
 
 ## Native Google sign-in
 

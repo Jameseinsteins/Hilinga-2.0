@@ -1,4 +1,5 @@
 import type { ItineraryDay } from "@/lib/database";
+import { auth } from "@/lib/firebase";
 
 type AiItineraryRequest = {
   answers: Record<string, string | string[] | undefined>;
@@ -29,13 +30,32 @@ function isItinerary(value: unknown): value is ItineraryDay[] {
 }
 
 export async function generateAiItinerary(request: AiItineraryRequest): Promise<ItineraryDay[]> {
-  const response = await fetch("/api/itinerary", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
-  });
+  const user = auth.currentUser;
+  if (!user) throw new Error("Sign in to use the AI planner.");
 
-  const payload = await response.json().catch(() => null) as { itinerary?: unknown; error?: string } | null;
+  async function postPlannerRequest(forceTokenRefresh = false) {
+    const token = await user!.getIdToken(forceTokenRefresh);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 60_000);
+    try {
+      return await fetch("/api/itinerary", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      });
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }
+
+  let response = await postPlannerRequest();
+  if (response.status === 401) response = await postPlannerRequest(true);
+
+  const payload = await response.json().catch(() => null) as { itinerary?: unknown; error?: string; requestId?: string } | null;
   if (!response.ok) throw new Error(payload?.error || "The AI planner is unavailable.");
   if (!isItinerary(payload?.itinerary)) throw new Error("The AI planner returned an invalid itinerary.");
   const expectedDays = Math.max(1, Math.min(7, Number.parseInt(String(request.answers.days ?? "2"), 10) || 2));

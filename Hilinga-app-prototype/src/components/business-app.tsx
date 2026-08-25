@@ -13,6 +13,12 @@ import {
   type BusinessPostCategory,
   type StoredBusinessItem,
 } from "@/lib/business-content";
+import {
+  setBusinessInquiryStatus,
+  subscribeToBusinessInquiries,
+  subscribeToBusinessProfileViewCount,
+  type BusinessInquiry,
+} from "@/lib/business-engagement";
 
 type BusinessTab = "home" | "my-business" | "visitors" | "create" | "inbox" | "profile";
 type BusinessItem = StoredBusinessItem;
@@ -23,6 +29,7 @@ const tabs: { id: BusinessTab; label: string; icon: string }[] = [
   { id: "my-business", label: "MY BIZ", icon: "storefront" },
   { id: "create", label: "Create", icon: "add" },
   { id: "visitors", label: "VISITORS", icon: "qr_code_scanner" },
+  { id: "inbox", label: "INBOX", icon: "inbox" },
   { id: "profile", label: "PROFILE", icon: "person" },
 ];
 
@@ -32,6 +39,25 @@ function Icon({ name, size = 24 }: { name: string; size?: number }) {
 
 function EmptyBusinessState({ icon, title, body }: { icon: string; title: string; body: string }) {
   return <div className="business-empty-state"><span><Icon name={icon} size={30} /></span><strong>{title}</strong><p>{body}</p></div>;
+}
+
+function BusinessInbox({ inquiries, error, onStatusChange }: {
+  inquiries: BusinessInquiry[];
+  error: string;
+  onStatusChange: (inquiry: BusinessInquiry, status: "read" | "unread") => Promise<void>;
+}) {
+  const [filter, setFilter] = useState<"All" | "Unread">("All");
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const visible = filter === "Unread" ? inquiries.filter((item) => item.status === "unread") : inquiries;
+
+  async function toggleStatus(inquiry: BusinessInquiry) {
+    if (pendingId) return;
+    setPendingId(inquiry.id);
+    try { await onStatusChange(inquiry, inquiry.status === "unread" ? "read" : "unread"); }
+    finally { setPendingId(null); }
+  }
+
+  return <div className="business-screen"><header className="business-page-header"><span>MESSAGES</span><h1>Inbox</h1><p>Questions and visit inquiries from Hilinga travelers.</p></header><div className="business-filter-pills">{(["All", "Unread"] as const).map((value) => <button key={value} className={filter === value ? "selected" : ""} onClick={() => setFilter(value)}>{value}{value === "Unread" && inquiries.some((item) => item.status === "unread") ? ` (${inquiries.filter((item) => item.status === "unread").length})` : ""}</button>)}</div>{error && <p className="business-image-error" role="alert">{error}</p>}{visible.length === 0 ? <EmptyBusinessState icon="mark_email_unread" title={filter === "Unread" ? "You’re all caught up" : "No inquiries yet"} body={filter === "Unread" ? "New traveler messages will be highlighted here." : "Messages sent from your public business page will appear here in real time."} /> : <section className="business-inbox-list" aria-label="Customer inquiries">{visible.map((inquiry) => <article key={inquiry.id} className={inquiry.status === "unread" ? "unread" : ""}><header><span className="business-inbox-avatar">{inquiry.senderName.charAt(0).toUpperCase()}</span><div><strong>{inquiry.senderName}</strong><span>{inquiry.createdAt.getTime() ? new Intl.DateTimeFormat("en-PH", { dateStyle: "medium", timeStyle: "short" }).format(inquiry.createdAt) : "Just now"}</span></div><em>{inquiry.status === "unread" ? "NEW" : "READ"}</em></header><p>{inquiry.message}</p><footer><a href={`mailto:${encodeURIComponent(inquiry.senderEmail)}?subject=${encodeURIComponent(`Re: ${inquiry.businessName} inquiry`)}`}><Icon name="reply" size={17} />Reply by email</a><button disabled={pendingId === inquiry.id} onClick={() => void toggleStatus(inquiry)}><Icon name={inquiry.status === "unread" ? "mark_email_read" : "mark_email_unread"} size={17} />Mark {inquiry.status === "unread" ? "read" : "unread"}</button></footer></article>)}</section>}</div>;
 }
 
 function resizeImage(file: File, maxSide = 900, quality = 0.68) {
@@ -92,6 +118,9 @@ export function BusinessApp() {
   const [editPageOpen, setEditPageOpen] = useState(false);
   const [pageError, setPageError] = useState("");
   const [pageSaving, setPageSaving] = useState(false);
+  const [inquiries, setInquiries] = useState<BusinessInquiry[]>([]);
+  const [inquiryError, setInquiryError] = useState("");
+  const [profileViewCount, setProfileViewCount] = useState(0);
 
   const businessName = pageInfo.name;
   const firstName = businessName.split(" ")[0];
@@ -129,6 +158,21 @@ export function BusinessApp() {
       })));
     }, (error) => console.warn("[business-posts] Could not load cloud posts:", error));
     return unsubscribe;
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const unsubscribeInquiries = subscribeToBusinessInquiries(
+      user.uid,
+      (nextInquiries) => { setInquiries(nextInquiries); setInquiryError(""); },
+      () => setInquiryError("Your inbox could not be loaded. Check your connection and Firebase rules."),
+    );
+    const unsubscribeViews = subscribeToBusinessProfileViewCount(
+      user.uid,
+      setProfileViewCount,
+      () => undefined,
+    );
+    return () => { unsubscribeInquiries(); unsubscribeViews(); };
   }, [user?.uid]);
 
   useEffect(() => {
@@ -270,13 +314,24 @@ export function BusinessApp() {
     }
   }
 
+  async function changeInquiryStatus(inquiry: BusinessInquiry, status: "read" | "unread") {
+    setInquiryError("");
+    try { await setBusinessInquiryStatus(inquiry.id, status); }
+    catch {
+      setInquiryError("That message could not be updated. Please try again.");
+      throw new Error("Inquiry status update failed");
+    }
+  }
+
+  const unreadInquiryCount = inquiries.filter((item) => item.status === "unread").length;
+
   return (
     <div className="business-app-shell">
       <main className="business-app-content">
         {tab === "home" && <div className="business-screen">
-          <header className="business-topbar"><div><span className="business-overline">HILINGA BUSINESS</span><h1>Good day, {firstName}</h1><p>{today}</p></div><div className="business-topbar-actions"><button className="business-alert-button" onClick={() => navigate("inbox")} aria-label="Inbox"><Icon name="inbox" size={22} /></button><button className="business-alert-button" aria-label="Notifications"><Icon name="notifications" size={22} /></button></div></header>
-          <section className="business-welcome-card"><span className="business-welcome-icon"><Icon name="storefront" size={27} /></span><div><span>BUSINESS OVERVIEW</span><h2>{businessName}</h2><p>Your dashboard is ready. Add your first offering to start building your presence.</p></div><button onClick={() => navigate("my-business")}>Manage <Icon name="arrow_forward" size={17} /></button></section>
-          <section><div className="business-section-heading"><div><span>TODAY</span><h2>At a glance</h2></div></div><div className="business-stats"><article><Icon name="visibility" /><strong>0</strong><span>Profile views</span></article><article><Icon name="forum" /><strong>0</strong><span>Inquiries</span></article><article><Icon name="inventory_2" /><strong>{items.length}</strong><span>Published items</span></article></div></section>
+          <header className="business-topbar"><div><span className="business-overline">HILINGA BUSINESS</span><h1>Good day, {firstName}</h1><p>{today}</p></div><div className="business-topbar-actions"><button className="business-alert-button" onClick={() => navigate("inbox")} aria-label={`${unreadInquiryCount} unread inquiries`}><Icon name="inbox" size={22} />{unreadInquiryCount > 0 && <em>{Math.min(99, unreadInquiryCount)}</em>}</button><button className="business-alert-button" aria-label="Notifications"><Icon name="notifications" size={22} /></button></div></header>
+          <section className="business-welcome-card"><span className="business-welcome-icon"><Icon name="storefront" size={27} /></span><div><span>BUSINESS OVERVIEW</span><h2>{businessName}</h2><p>{unreadInquiryCount ? `You have ${unreadInquiryCount} new traveler ${unreadInquiryCount === 1 ? "inquiry" : "inquiries"} waiting in your inbox.` : "Your public page, posts, visitor log, and customer messages are connected."}</p></div><button onClick={() => unreadInquiryCount ? navigate("inbox") : navigate("my-business")}>{unreadInquiryCount ? "Open inbox" : "Manage"} <Icon name="arrow_forward" size={17} /></button></section>
+          <section><div className="business-section-heading"><div><span>LIVE</span><h2>At a glance</h2></div></div><div className="business-stats"><article><Icon name="visibility" /><strong>{profileViewCount}</strong><span>Unique profile viewers</span></article><article><Icon name="forum" /><strong>{inquiries.length}</strong><span>Customer inquiries</span></article><article><Icon name="inventory_2" /><strong>{items.length}</strong><span>Published items</span></article></div></section>
           <section><div className="business-section-heading"><div><span>NEXT STEPS</span><h2>Grow your presence</h2></div></div><div className="business-task-list"><button onClick={() => navigate("my-business")}><span><Icon name="domain_add" /></span><div><strong>Complete your business details</strong><p>Add your location, hours, and contact information.</p></div><Icon name="chevron_right" /></button><button onClick={() => setCreateOpen(true)}><span><Icon name="add_circle" /></span><div><strong>Create your first offering</strong><p>Publish a listing, product, service, or promotion.</p></div><Icon name="chevron_right" /></button></div></section>
         </div>}
 
@@ -318,12 +373,12 @@ export function BusinessApp() {
 
         {tab === "visitors" && <BusinessVisitors businessName={businessName} businessLocation={pageInfo.location} initialQrValue={initialProfileQr} />}
 
-        {tab === "inbox" && <div className="business-screen"><header className="business-page-header"><span>MESSAGES</span><h1>Inbox</h1><p>Customer inquiries, conversations, and notifications.</p></header><div className="business-filter-pills"><button className="selected">All</button><button>Unread</button><button>Notifications</button></div><EmptyBusinessState icon="mark_email_unread" title="Your inbox is ready" body="New customer messages and business notifications will appear here." /></div>}
+        {tab === "inbox" && <BusinessInbox inquiries={inquiries} error={inquiryError} onStatusChange={changeInquiryStatus} />}
 
         {tab === "profile" && <div className="business-screen"><header className="business-page-header"><span>ACCOUNT</span><h1>Business Profile</h1><p>Manage your business account settings and access.</p></header><section className="business-account-card"><div className="business-profile-avatar">{avatarUrl ? <img src={avatarUrl} alt="" /> : businessName.charAt(0).toUpperCase()}</div><div><strong>{businessName}</strong><span>{user?.email ?? "Signed in"}</span><small><Icon name="verified_user" size={14} /> Secure account</small></div></section><section className="business-settings-card"><button><Icon name="badge" /><span><strong>Account information</strong><small>Business identity and contact details</small></span><Icon name="chevron_right" /></button><button><Icon name="notifications" /><span><strong>Notification settings</strong><small>Inquiries, updates, and promotions</small></span><Icon name="chevron_right" /></button><button><Icon name="shield" /><span><strong>Privacy & security</strong><small>Password and account access</small></span><Icon name="chevron_right" /></button><button className="business-logout" onClick={() => void signOut()}><Icon name="logout" /><span><strong>Sign out</strong><small>Return to account selection</small></span></button></section></div>}
       </main>
 
-      <nav className="business-tab-dock" aria-label="Business navigation"><div role="tablist">{tabs.map((item) => item.id === "create" ? <button key={item.id} className={`business-create-tab${tab === "inbox" ? " inbox-active" : ""}`} onClick={() => navigate(item.id)} aria-label="Create new business content"><span><Icon name="add" size={32} /></span><small>CREATE</small></button> : <button key={item.id} className={`business-tab ${tab === item.id ? "selected" : ""}`} onClick={() => navigate(item.id)} role="tab" aria-selected={tab === item.id}><Icon name={item.icon} size={22} /><span>{item.label}</span></button>)}</div></nav>
+      <nav className="business-tab-dock" aria-label="Business navigation"><div role="tablist">{tabs.map((item) => item.id === "create" ? <button key={item.id} className="business-create-tab" onClick={() => navigate(item.id)} aria-label="Create new business content"><span><Icon name="add" size={32} /></span><small>CREATE</small></button> : <button key={item.id} className={`business-tab ${tab === item.id ? "selected" : ""}`} onClick={() => navigate(item.id)} role="tab" aria-selected={tab === item.id}><Icon name={item.icon} size={22} />{item.id === "inbox" && unreadInquiryCount > 0 && <em>{Math.min(99, unreadInquiryCount)}</em>}<span>{item.label}</span></button>)}</div></nav>
 
       {createOpen && <div className="business-modal-backdrop" onClick={(event) => event.target === event.currentTarget && setCreateOpen(false)}><form className="business-create-sheet" onSubmit={createItem}><div className="business-sheet-handle" /><header><div><span>CREATE POST</span><h2>Choose a post category</h2></div><button type="button" onClick={() => setCreateOpen(false)} aria-label="Close"><Icon name="close" /></button></header><div className="business-kind-grid business-category-grid">{(["Photos & Videos", "Events", "Promotions"] as BusinessPostCategory[]).map((value) => <button type="button" key={value} className={category === value ? "selected" : ""} onClick={() => { setCategory(value); setImageError(""); }}><Icon name={{ "Photos & Videos": "perm_media", Events: "event", Promotions: "campaign" }[value]} size={22} /><span>{value}</span></button>)}</div><div className="business-image-field"><span className="business-image-label">Photo or video</span>{mediaUrl ? <div className="business-image-preview">{mediaType === "video" ? <video src={mediaUrl} aria-label="Video upload preview" controls playsInline /> : <img src={mediaUrl} alt="Upload preview" />}<div><label htmlFor="business-media-upload"><Icon name="photo_camera" size={18} /> Replace</label><button type="button" onClick={() => setMediaUrl("")}><Icon name="delete" size={18} /> Remove</button></div></div> : <label className="business-image-upload" htmlFor="business-media-upload"><Icon name="add_photo_alternate" size={30} /><strong>Upload a photo or video</strong><span>Images up to 10 MB · Videos up to 3 MB</span></label>}<input id="business-media-upload" className="file-input-hidden" type="file" accept="image/*,video/*" onChange={(event) => void chooseMedia(event.target.files?.[0])} />{imageError && <p className="business-image-error" role="alert">{imageError}</p>}</div><label>Post title<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={category === "Events" ? "Name your event" : category === "Promotions" ? "Name your promotion" : "Add a title"} /></label>{category === "Events" && <div className="business-editor-grid"><label>Event date<input type="date" value={eventDate} onChange={(event) => setEventDate(event.target.value)} /></label><label>Event location<input value={eventLocation} onChange={(event) => setEventLocation(event.target.value)} placeholder="Venue or address" /></label></div>}{category === "Promotions" && <div className="business-editor-grid"><label>Offer details<input value={promotionOffer} onChange={(event) => setPromotionOffer(event.target.value)} placeholder="e.g. 20% off all tours" /></label><label>Offer ends <small>(optional)</small><input type="date" value={promotionEnds} onChange={(event) => setPromotionEnds(event.target.value)} /></label></div>}<label>Caption <small>(optional)</small><textarea value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="Write something about this post" /></label><button className="business-publish-button" type="submit" disabled={!title.trim() || !mediaUrl}>Publish to {category}</button></form></div>}
 

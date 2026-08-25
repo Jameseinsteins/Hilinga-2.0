@@ -42,6 +42,12 @@ import {
   experienceCategories,
   subscribeToCommunityPosts,
 } from "@/lib/community-feed";
+import {
+  recordBusinessProfileView,
+  sendBusinessInquiry,
+  setBusinessPostLiked,
+  subscribeToLikedBusinessPosts,
+} from "@/lib/business-engagement";
 import { useAuth } from "@/providers/auth-provider";
 import { useDatabase } from "@/providers/database-provider";
 import { ProfileQrCard } from "@/components/tourist-passport";
@@ -84,6 +90,7 @@ type ExploreItem = {
   logoSource?: string;
   businessScale?: BusinessScale;
   registered?: boolean;
+  ownerUid?: string;
 };
 
 const catalog: ExploreItem[] = [
@@ -275,7 +282,7 @@ function Button({ label, onPress, disabled = false, destructive = false, loading
 }) {
   const cls = destructive ? (secondary ? "btn btn-destructive" : "btn btn-destructive-fill") : secondary ? "btn btn-secondary" : "btn btn-primary";
   return (
-    <button className={cls} disabled={disabled || loading} onClick={onPress}>
+    <button type="button" className={cls} disabled={disabled || loading} onClick={onPress}>
       {loading ? <div className="spinner" style={{ width: 20, height: 20, borderWidth: 2, borderTopColor: secondary ? (destructive ? "var(--c-red)" : "var(--c-green)") : "white" }} /> : label}
     </button>
   );
@@ -1008,6 +1015,11 @@ function Explore({ initialFilter, initialBusinessId, onFilterHandled, onBusiness
   const [reviewRating, setReviewRating] = useState<number | null>(null);
   const [reviewPosting, setReviewPosting] = useState(false);
   const [reviewDeleteTarget, setReviewDeleteTarget] = useState<CommunityPost | null>(null);
+  const [inquiryOpen, setInquiryOpen] = useState(false);
+  const [inquiryMessage, setInquiryMessage] = useState("");
+  const [inquirySending, setInquirySending] = useState(false);
+  const [inquiryError, setInquiryError] = useState<string | null>(null);
+  const [inquirySent, setInquirySent] = useState(false);
 
   const [businessDirectory, setBusinessDirectory] = useState(() => readRegisteredBusinesses());
   useEffect(() => {
@@ -1031,6 +1043,7 @@ function Explore({ initialFilter, initialBusinessId, onFilterHandled, onBusiness
     location: page.location,
     businessScale: page.businessScale,
     registered: true,
+    ownerUid: page.ownerUid,
   })), [businessDirectory]);
   const allItems = useMemo(() => [...registeredBusinesses, ...catalog], [registeredBusinesses]);
 
@@ -1050,6 +1063,20 @@ function Explore({ initialFilter, initialBusinessId, onFilterHandled, onBusiness
     if (business) setSelected(business);
     onBusinessHandled();
   }, [allItems, initialBusinessId, onBusinessHandled]);
+  useEffect(() => {
+    setInquiryOpen(false);
+    setInquiryMessage("");
+    setInquiryError(null);
+    setInquirySent(false);
+  }, [selected?.id]);
+  useEffect(() => {
+    if (!user?.uid || !selected?.registered || !selected.ownerUid) return;
+    void recordBusinessProfileView({
+      businessId: selected.ownerUid,
+      businessName: selected.name,
+      viewerUid: user.uid,
+    }).catch(() => undefined);
+  }, [selected, user?.uid]);
   const results = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     const matches = allItems.filter((item) =>
@@ -1136,6 +1163,28 @@ function Explore({ initialFilter, initialBusinessId, onFilterHandled, onBusiness
       catch { setReviewError("That review could not be deleted."); }
       finally { setReviewPosting(false); }
     }
+
+    async function submitInquiry() {
+      if (!user || !selectedBusiness.ownerUid || inquirySending) return;
+      setInquirySending(true);
+      setInquiryError(null);
+      try {
+        await sendBusinessInquiry({
+          businessId: selectedBusiness.ownerUid,
+          businessName: selectedBusiness.name,
+          senderUid: user.uid,
+          senderName: profile?.display_name.trim() || user.displayName || user.email?.split("@")[0] || "Hilinga traveler",
+          senderEmail: user.email || "",
+          message: inquiryMessage,
+        });
+        setInquiryMessage("");
+        setInquirySent(true);
+      } catch (nextError) {
+        setInquiryError(nextError instanceof Error ? nextError.message : "Your message could not be sent. Please try again.");
+      } finally {
+        setInquirySending(false);
+      }
+    }
     return (
       <div className="screen explore-business-profile-screen">
         <header className="business-public-nav">
@@ -1156,7 +1205,7 @@ function Explore({ initialFilter, initialBusinessId, onFilterHandled, onBusiness
           <p className="business-public-location"><Icon name="location_on" size={18} />{selected.location || "Legazpi City, Albay"}</p>
           <div className="business-public-actions">
             <button className="primary" onClick={() => void toggleSaved(selected)} disabled={pendingId !== null}><Icon name={isSaved ? "favorite" : "favorite_border"} size={19} filled={isSaved} />{isSaved ? "Saved" : "Save"}</button>
-            <button onClick={() => { window.location.href = `mailto:?subject=${encodeURIComponent(`Inquiry for ${selected.name}`)}`; }}><Icon name="chat_bubble" size={18} />Message</button>
+            <button onClick={() => selected.ownerUid ? setInquiryOpen(true) : window.location.assign(`mailto:?subject=${encodeURIComponent(`Inquiry for ${selected.name}`)}`)}><Icon name="chat_bubble" size={18} />Message</button>
             <button onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${selected.latitude},${selected.longitude}`, "_blank", "noopener,noreferrer")}><Icon name="directions" size={19} />Directions</button>
           </div>
         </section>
@@ -1190,6 +1239,9 @@ function Explore({ initialFilter, initialBusinessId, onFilterHandled, onBusiness
         </section>
 
         {relatedBusinesses.length > 0 && <section className="explore-shelf business-related"><div className="explore-shelf-heading"><div><span>YOU MAY ALSO LIKE</span><h2>Similar businesses</h2></div></div><div className="explore-card-row">{relatedBusinesses.map((item) => <article className="explore-poster-card" key={item.id}><button className="explore-poster-main" onClick={() => { setSelected(item); document.querySelector(".app-content")?.scrollTo({ top: 0, behavior: "smooth" }); }}><span className="explore-poster-image-wrap"><img src={item.source} alt={item.name} className="explore-poster-image" /><small>{item.category.toUpperCase()}</small></span><span className="explore-poster-copy"><strong>{item.name}</strong><span>{item.subtitle}</span><em><Icon name="location_on" size={14} />{item.location || "Legazpi City"}</em></span></button></article>)}</div></section>}
+        <AppModal visible={inquiryOpen} title={`Message ${selected.name}`} onClose={() => !inquirySending && setInquiryOpen(false)}>
+          {inquirySent ? <div className="business-inquiry-success"><span><Icon name="mark_email_read" size={30} /></span><strong>Message sent</strong><p>{selected.name} will see your inquiry in their Hilinga business inbox.</p><Button label="Done" onPress={() => setInquiryOpen(false)} /></div> : <form className="business-inquiry-form" onSubmit={(event) => { event.preventDefault(); void submitInquiry(); }}><p>Ask about availability, reservations, services, or anything else you need to plan your visit.</p><label><span>Your message</span><textarea autoFocus value={inquiryMessage} maxLength={1500} rows={6} onChange={(event) => setInquiryMessage(event.target.value)} placeholder={`Hi ${selected.name}, I’d like to ask about…`} /></label><div><small>{inquiryMessage.length}/1500</small><Button label="Send message" loading={inquirySending} disabled={inquiryMessage.trim().length < 10} onPress={() => void submitInquiry()} /></div>{inquiryError && <p className="error-text" role="alert">{inquiryError}</p>}</form>}
+        </AppModal>
         <ConfirmModal visible={reviewDeleteTarget !== null} title="Delete this review?" message="Your rating and comment will be permanently removed from this business profile." confirmLabel="Delete review" loading={reviewPosting} onCancel={() => !reviewPosting && setReviewDeleteTarget(null)} onConfirm={removeReview} />
       </div>
     );
@@ -1581,10 +1633,13 @@ function CommunityFeedLegacy({ businessMode, businessProfile, products, onSaveBu
 void CommunityFeedLegacy;
 
 function Feed({ onOpenBusiness }: { onOpenBusiness: (businessId: string) => void }) {
+  const { user } = useAuth();
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<"All" | BusinessPost["category"]>("All");
   const [publishedPosts, setPublishedPosts] = useState<BusinessPost[]>(() => readPublishedBusinessPosts());
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
+  const [likePendingIds, setLikePendingIds] = useState<Set<string>>(new Set());
+  const [likeError, setLikeError] = useState<string | null>(null);
 
   useEffect(() => {
     const refresh = () => setPublishedPosts(readPublishedBusinessPosts());
@@ -1601,6 +1656,15 @@ function Feed({ onOpenBusiness }: { onOpenBusiness: (businessId: string) => void
     };
   }, []);
 
+  useEffect(() => {
+    if (!user?.uid) { setLikedIds(new Set()); return; }
+    return subscribeToLikedBusinessPosts(
+      user.uid,
+      setLikedIds,
+      () => setLikeError("Your saved likes could not be loaded."),
+    );
+  }, [user?.uid]);
+
   const curatedPosts = useMemo<BusinessPost[]>(() => [
     { id: "coffee-morning", businessId: "albay-coffee-house", businessName: "Albay Coffee House", businessCategory: "Cafes", businessLocation: "Old Albay District, Legazpi City", businessLogoUrl: explore4, category: "Photos & Videos", title: "Bicol-grown coffee, brewed fresh", detail: "Start your Legazpi morning with locally sourced beans and a warm pastry while enjoying the neighborhood.", mediaUrl: explore4, mediaType: "image", createdAt: "2026-08-12T08:30:00.000Z" },
     { id: "market-weekend", businessId: "legazpi-local-market", businessName: "Legazpi Local Market", businessCategory: "Shopping", businessLocation: "Legazpi Port District, Legazpi City", businessLogoUrl: explore6, category: "Promotions", title: "Weekend local makers showcase", detail: "Meet Albay makers, taste regional favorites, and bring home handcrafted finds this weekend.", mediaUrl: explore6, mediaType: "image", promotionOffer: "Special bundles from participating local sellers", createdAt: "2026-08-11T10:00:00.000Z" },
@@ -1615,12 +1679,28 @@ function Feed({ onOpenBusiness }: { onOpenBusiness: (businessId: string) => void
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [category, curatedPosts, publishedPosts, query]);
 
-  function toggleLike(postId: string) {
+  async function toggleLike(postId: string) {
+    if (!user?.uid || likePendingIds.has(postId)) return;
+    const wasLiked = likedIds.has(postId);
+    setLikeError(null);
+    setLikePendingIds((current) => new Set(current).add(postId));
     setLikedIds((current) => {
       const next = new Set(current);
-      if (next.has(postId)) next.delete(postId); else next.add(postId);
+      if (wasLiked) next.delete(postId); else next.add(postId);
       return next;
     });
+    try {
+      await setBusinessPostLiked(postId, user.uid, !wasLiked);
+    } catch {
+      setLikedIds((current) => {
+        const next = new Set(current);
+        if (wasLiked) next.add(postId); else next.delete(postId);
+        return next;
+      });
+      setLikeError("That like could not be saved. Please try again.");
+    } finally {
+      setLikePendingIds((current) => { const next = new Set(current); next.delete(postId); return next; });
+    }
   }
 
   return (
@@ -1633,6 +1713,7 @@ function Feed({ onOpenBusiness }: { onOpenBusiness: (businessId: string) => void
       <div className="chip-scroll social-feed-filters" aria-label="Filter business posts">
         {(["All", "Photos & Videos", "Events", "Promotions"] as const).map((value) => <button key={value} className={`chip feed-chip ${category === value ? "chip-selected" : ""}`} onClick={() => setCategory(value)}><Icon name={value === "All" ? "dynamic_feed" : value === "Events" ? "event" : value === "Promotions" ? "local_offer" : "photo_library"} size={16} />{value}</button>)}
       </div>
+      {likeError && <p className="error-text" role="alert">{likeError}</p>}
 
       {visiblePosts.length === 0 ? <EmptyState icon="storefront" title="No business posts found" message="Try another search or show every post." action="Show all posts" onAction={() => { setQuery(""); setCategory("All"); }} /> : <section className="social-feed-list" aria-label="Business news feed">
         {visiblePosts.map((post) => {
@@ -1647,7 +1728,7 @@ function Feed({ onOpenBusiness }: { onOpenBusiness: (businessId: string) => void
             {post.category === "Events" && <div className="social-post-highlight"><Icon name="calendar_month" size={21} /><div><strong>{post.eventDate ? new Date(`${post.eventDate}T00:00:00`).toLocaleDateString("en-PH", { month: "long", day: "numeric", year: "numeric" }) : "Date to be announced"}</strong><span>{post.eventLocation || post.businessLocation}</span></div></div>}
             {post.category === "Promotions" && <div className="social-post-highlight promotion"><Icon name="sell" size={21} /><div><strong>{post.promotionOffer || "Special offer"}</strong><span>{post.promotionEnds ? `Available until ${new Date(`${post.promotionEnds}T00:00:00`).toLocaleDateString("en-PH", { month: "long", day: "numeric" })}` : "Limited-time offer"}</span></div></div>}
             {post.mediaUrl && (post.mediaType === "video" ? <video className="social-post-media" src={post.mediaUrl} controls playsInline /> : <img className="social-post-media" src={post.mediaUrl} alt={post.title} />)}
-            <footer><button className={liked ? "liked" : ""} onClick={() => toggleLike(post.id)}><Icon name="favorite" size={20} filled={liked} />{liked ? "Liked" : "Like"}</button><button onClick={() => onOpenBusiness(post.businessId)}><Icon name="rate_review" size={20} />Reviews</button><button onClick={() => navigator.share?.({ title: post.title, text: `${post.businessName}: ${post.detail}` })}><Icon name="share" size={20} />Share</button></footer>
+            <footer><button className={liked ? "liked" : ""} disabled={likePendingIds.has(post.id)} onClick={() => void toggleLike(post.id)}><Icon name="favorite" size={20} filled={liked} />{liked ? "Liked" : "Like"}</button><button onClick={() => onOpenBusiness(post.businessId)}><Icon name="rate_review" size={20} />Reviews</button><button onClick={() => navigator.share?.({ title: post.title, text: `${post.businessName}: ${post.detail}` })}><Icon name="share" size={20} />Share</button></footer>
           </article>;
         })}
       </section>}
