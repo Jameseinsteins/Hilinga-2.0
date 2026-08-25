@@ -44,7 +44,7 @@ import {
 } from "@/lib/community-feed";
 import { useAuth } from "@/providers/auth-provider";
 import { useDatabase } from "@/providers/database-provider";
-import { TouristPassport } from "@/components/tourist-passport";
+import { ProfileQrCard } from "@/components/tourist-passport";
 
 import explore1 from "@/assets/images/hilinga/explore-1.png";
 import explore2 from "@/assets/images/hilinga/explore-2.png";
@@ -3052,7 +3052,7 @@ function ProfileScreen({ goPlanner, goExplore, onReset, businessMode }: { goPlan
             </button>
           </div>
 
-          {!businessMode && <TouristPassport />}
+          {!businessMode && <ProfileQrCard />}
 
           <section className="profile-section">
             <div className="profile-section-heading">

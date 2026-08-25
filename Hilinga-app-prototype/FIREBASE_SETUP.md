@@ -66,14 +66,15 @@ Firestore is authoritative for business pages and posts. Business mode does not
 read or write browser local storage. The free implementation supports compressed
 photos; video posts require a separate file-storage service and are disabled.
 
-Tourist Passport data is stored in `touristProfiles/{uid}` and
-`touristQrCodes/{token}`. Successful business scans create records in
-`touristVisitLogs/{visitId}`. Deploy the checked-in Firestore rules before
-testing this flow: tourist QR documents contain only a revocable token, while
-the tourist profile and visit log hold the authorized display fields.
+Profile QR data uses the existing `touristProfiles/{uid}` and
+`touristQrCodes/{token}` collection names for backward compatibility.
+Successful business scans create records in `touristVisitLogs/{visitId}`.
+Deploy the checked-in Firestore rules before testing this flow: QR documents
+contain only a revocable token, while the approved user-profile snapshot and
+visit log hold the display fields needed for check-in.
 
 Set `VITE_PUBLIC_APP_URL` to the public origin of the deployed app before
-building for production. Tourist QR images encode this origin and route an
+building for production. Profile QR images encode this origin and route an
 authenticated business owner to the Visitors logbook. The app falls back to
 the current browser origin for local development. After a valid scan, one visit
 record updates both the business Visitors logbook and the tourist's My Visits

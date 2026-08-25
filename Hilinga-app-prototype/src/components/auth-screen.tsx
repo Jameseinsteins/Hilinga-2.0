@@ -15,7 +15,8 @@ import hilingaLogo from "@/assets/images/hilinga/hilinga-logo.png";
 type Mode = "login" | "signup" | "forgot";
 
 function entryAccountMode(): AccountMode {
-  return new URLSearchParams(window.location.search).has("tourist_token") ? "business" : getLastAccountMode();
+  const params = new URLSearchParams(window.location.search);
+  return params.has("profile_qr") || params.has("tourist_token") ? "business" : getLastAccountMode();
 }
 
 export function AuthScreen({ configured }: { configured: boolean }) {

@@ -2221,7 +2221,7 @@ ul, ol { list-style: none; }
   white-space: nowrap;
 }
 
-/* ── Tourist Passport ── */
+/* ── User Profile QR ── */
 .passport-card, .passport-visits { display: flex; flex-direction: column; gap: 16px; padding: 20px; border: 1px solid #DCE9E0; border-radius: 24px; background: linear-gradient(145deg, #F7FCF8, #FFFFFF 68%); box-shadow: 0 10px 30px rgba(24,69,45,.07); }
 .passport-loading { min-height: 120px; align-items: center; justify-content: center; color: var(--c-body); }
 .passport-load-error { min-height: 190px; align-items: center; justify-content: center; text-align: center; }
@@ -2256,6 +2256,8 @@ ul, ol { list-style: none; }
 .passport-actions button:disabled, .passport-consent button:disabled, .passport-details button:disabled, .passport-danger-link:disabled, .business-scan-button:disabled { cursor: not-allowed; opacity: .55; }
 .passport-danger-link { align-self: center; color: #A2443C; font-size: 10px; font-weight: 800; }
 .passport-message { margin: 0; padding: 9px 11px; border-radius: 10px; background: #FFF5E5; color: #7A5B2D; font-size: 11px; line-height: 16px; }
+.passport-profile-source { display: flex; align-items: center; gap: 7px; margin: 0; padding-top: 11px; border-top: 1px solid #E2ECE5; color: var(--c-body); font-size: 10px; line-height: 16px; }
+.passport-profile-source .material-symbols-outlined { flex: 0 0 auto; color: var(--c-green); }
 .passport-details-toggle { display: flex; align-items: center; justify-content: space-between; min-height: 42px; padding: 0 2px; border-top: 1px solid #E2ECE5; color: var(--c-body); font-size: 11px; font-weight: 850; }
 .passport-details-toggle span { display: inline-flex; align-items: center; gap: 7px; }
 .passport-details { display: flex; flex-direction: column; gap: 12px; padding-top: 2px; }

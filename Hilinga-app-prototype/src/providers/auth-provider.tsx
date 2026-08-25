@@ -200,8 +200,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
         }
         setAvatarUrl(localAvatarUrl ?? null);
         if (resolveAccountMode(userId, saved.account_mode) !== "business") {
-          void ensureTouristPassport(userId, saved.display_name, localAvatarUrl ?? "")
-            .catch((passportError) => console.warn("[tourist-passport] Could not initialize passport:", passportError));
+          void ensureTouristPassport(userId, saved.display_name, localAvatarUrl ?? "", {
+            language: saved.language,
+            interests: saved.interests,
+          })
+            .catch((profileQrError) => console.warn("[profile-qr] Could not initialize the Profile QR:", profileQrError));
         }
         console.info("[profile] save completed", { durationMs: Math.round(performance.now() - startedAt) });
       } catch (nextError) {

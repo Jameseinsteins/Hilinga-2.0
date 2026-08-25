@@ -22,6 +22,8 @@ export type TouristPassport = {
   firstName: string;
   lastName: string;
   profilePhoto: string;
+  language: string;
+  interests: string[];
   nationality: string;
   country: string;
   region: string;
@@ -42,6 +44,8 @@ export type TouristVisit = {
   touristName: string;
   touristCountry: string;
   touristProvince: string;
+  userLanguage: string;
+  userInterests: string[];
   businessId: string;
   businessName: string;
   businessLocation: string;
@@ -65,20 +69,22 @@ function randomToken() {
   return crypto.randomUUID().replace(/-/g, "");
 }
 
-function touristCode(userId: string) {
+function userProfileCode(userId: string) {
   let hash = 0;
   for (const char of userId) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return `HLG-T-${String(hash % 1_000_000).padStart(6, "0")}`;
+  return `HLG-U-${String(hash % 1_000_000).padStart(6, "0")}`;
 }
 
 function normalizePassport(ownerUid: string, value: Partial<TouristPassport>): TouristPassport {
   const timestamp = now();
   return {
     ownerUid,
-    touristCode: value.touristCode || touristCode(ownerUid),
+    touristCode: value.touristCode?.replace(/^HLG-T-/, "HLG-U-") || userProfileCode(ownerUid),
     firstName: value.firstName || "",
     lastName: value.lastName || "",
     profilePhoto: value.profilePhoto || "",
+    language: value.language || "English",
+    interests: Array.isArray(value.interests) ? value.interests.filter((item): item is string => typeof item === "string") : [],
     nationality: value.nationality || "Filipino",
     country: value.country || "Philippines",
     region: value.region || "",
@@ -118,18 +124,34 @@ export async function getTouristPassport(ownerUid: string) {
   return snapshot.exists() ? normalizePassport(ownerUid, snapshot.data() as Partial<TouristPassport>) : null;
 }
 
-export async function ensureTouristPassport(ownerUid: string, displayName: string, profilePhoto = "") {
+export async function ensureTouristPassport(
+  ownerUid: string,
+  displayName: string,
+  profilePhoto = "",
+  accountProfile: { language?: string; interests?: string[] } = {},
+) {
   const existing = await getTouristPassport(ownerUid);
-  // Re-write both sides of the QR relationship so older or partially-created
-  // passports recover from a missing token lookup document automatically.
-  if (existing) return commitPassport(existing);
+  const normalizedName = displayName.trim();
+  const [firstName = "Hilinga User", ...rest] = normalizedName.split(/\s+/).filter(Boolean);
+  // Keep the QR identity synchronized with the signed-in account profile while
+  // also repairing an older or partially-created token lookup document.
+  if (existing) {
+    return commitPassport(normalizePassport(ownerUid, {
+      ...existing,
+      ...(normalizedName ? { firstName, lastName: rest.join(" ") } : {}),
+      profilePhoto: profilePhoto || existing.profilePhoto,
+      language: accountProfile.language || existing.language,
+      interests: accountProfile.interests ?? existing.interests,
+    }));
+  }
 
-  const [firstName = "Traveler", ...rest] = displayName.trim().split(/\s+/).filter(Boolean);
   const created = normalizePassport(ownerUid, {
-    touristCode: touristCode(ownerUid),
+    touristCode: userProfileCode(ownerUid),
     firstName,
     lastName: rest.join(" "),
     profilePhoto,
+    language: accountProfile.language || "English",
+    interests: accountProfile.interests ?? [],
     qrStatus: "disabled",
     consentEnabled: false,
   });
@@ -144,7 +166,7 @@ export async function saveTouristPassport(ownerUid: string, input: Partial<Touri
 
 export async function regenerateTouristQr(ownerUid: string) {
   const current = await getTouristPassport(ownerUid);
-  if (!current) throw new Error("Set up your tourist profile before regenerating the QR.");
+  if (!current) throw new Error("Set up your user profile before regenerating the Profile QR.");
   const regenerated = normalizePassport(ownerUid, {
     ...current,
     qrToken: randomToken(),
@@ -161,23 +183,23 @@ export async function setTouristQrStatus(ownerUid: string, status: TouristQrStat
 
 export function tokenFromTouristQrValue(value: string) {
   const trimmed = value.trim();
-  const match = trimmed.match(/(?:qr\/tourist\/|tourist_token=|hilinga:tourist:)([A-Za-z0-9]+)/i);
+  const match = trimmed.match(/(?:qr\/(?:profile|tourist)\/|(?:profile_qr|tourist_token)=|hilinga:(?:profile|tourist):)([A-Za-z0-9]+)/i);
   return match?.[1] || trimmed.replace(/[^A-Za-z0-9]/g, "");
 }
 
 export async function resolveTouristQr(value: string) {
   const token = tokenFromTouristQrValue(value);
   if (!/^[A-Za-z0-9]{24,128}$/.test(token)) {
-    throw new Error("That QR code does not contain a valid Hilinga tourist token.");
+    throw new Error("That QR code does not contain a valid Hilinga profile token.");
   }
   const qrSnapshot = await getDoc(doc(qrCodes, token));
   if (!qrSnapshot.exists() || qrSnapshot.data().status !== "active") {
-    throw new Error("This Hilinga QR is disabled, expired, or invalid.");
+    throw new Error("This Hilinga Profile QR is disabled, expired, or invalid.");
   }
   const ownerUid = String(qrSnapshot.data().ownerUid || "");
   const passport = ownerUid ? await getTouristPassport(ownerUid) : null;
   if (!passport || passport.qrToken !== token || passport.qrStatus !== "active" || !passport.consentEnabled) {
-    throw new Error("This tourist QR is no longer active.");
+    throw new Error("This Profile QR is no longer active.");
   }
   return passport;
 }
@@ -215,6 +237,8 @@ export async function recordTouristVisit(input: {
     touristName: `${input.passport.firstName} ${input.passport.lastName}`.trim(),
     touristCountry: input.passport.country,
     touristProvince: input.passport.province,
+    userLanguage: input.passport.language,
+    userInterests: input.passport.interests,
     businessId: input.businessId,
     businessName: input.businessName,
     businessLocation: input.businessLocation,
@@ -238,6 +262,8 @@ function toVisit(id: string, value: Record<string, unknown>): TouristVisit {
     touristName: String(value.touristName || ""),
     touristCountry: String(value.touristCountry || ""),
     touristProvince: String(value.touristProvince || ""),
+    userLanguage: String(value.userLanguage || "English"),
+    userInterests: Array.isArray(value.userInterests) ? value.userInterests.filter((item): item is string => typeof item === "string") : [],
     businessId: String(value.businessId || ""),
     businessName: String(value.businessName || "Hilinga business"),
     businessLocation: String(value.businessLocation || ""),
@@ -266,7 +292,7 @@ export function touristQrUrl(token: string) {
   const configuredOrigin = String(import.meta.env.VITE_PUBLIC_APP_URL || "").trim();
   const fallbackOrigin = typeof window === "undefined" ? "https://hilinga.app" : window.location.origin;
   const url = new URL("/", configuredOrigin || fallbackOrigin);
-  url.searchParams.set("tourist_token", token);
+  url.searchParams.set("profile_qr", token);
   url.hash = "business/visitors";
   return url.toString();
 }

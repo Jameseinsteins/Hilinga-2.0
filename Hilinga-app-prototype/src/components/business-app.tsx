@@ -96,7 +96,11 @@ export function BusinessApp() {
   const businessName = pageInfo.name;
   const firstName = businessName.split(" ")[0];
   const today = useMemo(() => new Intl.DateTimeFormat("en-PH", { weekday: "long", month: "long", day: "numeric" }).format(new Date()), []);
-  const initialTouristQr = pageReady ? new URLSearchParams(window.location.search).get("tourist_token") ?? "" : "";
+  const initialProfileQr = pageReady
+    ? new URLSearchParams(window.location.search).get("profile_qr")
+      ?? new URLSearchParams(window.location.search).get("tourist_token")
+      ?? ""
+    : "";
 
   useEffect(() => {
     const onPopState = () => {
@@ -312,7 +316,7 @@ export function BusinessApp() {
           </div>
         </div>}
 
-        {tab === "visitors" && <BusinessVisitors businessName={businessName} businessLocation={pageInfo.location} initialQrValue={initialTouristQr} />}
+        {tab === "visitors" && <BusinessVisitors businessName={businessName} businessLocation={pageInfo.location} initialQrValue={initialProfileQr} />}
 
         {tab === "inbox" && <div className="business-screen"><header className="business-page-header"><span>MESSAGES</span><h1>Inbox</h1><p>Customer inquiries, conversations, and notifications.</p></header><div className="business-filter-pills"><button className="selected">All</button><button>Unread</button><button>Notifications</button></div><EmptyBusinessState icon="mark_email_unread" title="Your inbox is ready" body="New customer messages and business notifications will appear here." /></div>}
 

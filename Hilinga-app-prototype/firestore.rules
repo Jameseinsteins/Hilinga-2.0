@@ -68,6 +68,7 @@ service cloud.firestore {
         && request.resource.data.ownerUid == touristId
         && request.resource.data.keys().hasOnly([
           'ownerUid', 'touristCode', 'firstName', 'lastName', 'profilePhoto',
+          'language', 'interests',
           'nationality', 'country', 'region', 'province', 'city',
           'verificationStatus', 'qrToken', 'qrStatus', 'consentEnabled',
           'createdAt', 'updatedAt'
@@ -75,6 +76,11 @@ service cloud.firestore {
         && request.resource.data.touristCode is string
         && request.resource.data.firstName is string
         && request.resource.data.lastName is string
+        && request.resource.data.language is string
+        && request.resource.data.language.size() > 0
+        && request.resource.data.language.size() <= 80
+        && request.resource.data.interests is list
+        && request.resource.data.interests.size() <= 30
         && request.resource.data.country is string
         && request.resource.data.qrToken is string
         && request.resource.data.qrToken.size() >= 24
@@ -112,11 +118,15 @@ service cloud.firestore {
         && request.resource.data.businessId == request.auth.uid
         && request.resource.data.keys().hasOnly([
           'touristId', 'touristCode', 'touristName', 'touristCountry',
-          'touristProvince', 'businessId', 'businessName', 'businessLocation',
+          'touristProvince', 'userLanguage', 'userInterests',
+          'businessId', 'businessName', 'businessLocation',
           'qrToken', 'scannedBy', 'visitedAt', 'scanMethod', 'status', 'createdAt'
         ])
         && request.resource.data.touristId is string
         && request.resource.data.touristCode is string
+        && request.resource.data.userLanguage is string
+        && request.resource.data.userInterests is list
+        && request.resource.data.userInterests.size() <= 30
         && request.resource.data.businessName is string
         && request.resource.data.businessName.size() > 0
         && request.resource.data.businessName.size() <= 120
@@ -140,7 +150,17 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/touristProfiles/$(request.resource.data.touristId)).data.consentEnabled == true
         && request.resource.data.touristCode == get(/databases/$(database)/documents/touristProfiles/$(request.resource.data.touristId)).data.touristCode
         && request.resource.data.touristCountry == get(/databases/$(database)/documents/touristProfiles/$(request.resource.data.touristId)).data.country
-        && request.resource.data.touristProvince == get(/databases/$(database)/documents/touristProfiles/$(request.resource.data.touristId)).data.province;
+        && request.resource.data.touristProvince == get(/databases/$(database)/documents/touristProfiles/$(request.resource.data.touristId)).data.province
+        && (
+          (!('language' in get(/databases/$(database)/documents/touristProfiles/$(request.resource.data.touristId)).data)
+            && request.resource.data.userLanguage == 'English')
+          || request.resource.data.userLanguage == get(/databases/$(database)/documents/touristProfiles/$(request.resource.data.touristId)).data.language
+        )
+        && (
+          (!('interests' in get(/databases/$(database)/documents/touristProfiles/$(request.resource.data.touristId)).data)
+            && request.resource.data.userInterests.size() == 0)
+          || request.resource.data.userInterests == get(/databases/$(database)/documents/touristProfiles/$(request.resource.data.touristId)).data.interests
+        );
       allow update, delete: if false;
     }
 
