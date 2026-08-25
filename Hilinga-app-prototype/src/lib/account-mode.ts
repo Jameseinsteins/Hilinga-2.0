@@ -18,12 +18,23 @@ export function getLastAccountMode(): AccountMode {
   return isAccountMode(mode) ? mode : "explore";
 }
 
-export function resolveAccountMode(userId: string): AccountMode {
+export function resolveAccountMode(userId: string, cloudMode?: AccountMode): AccountMode {
+  // A pending mode means the user explicitly selected a mode on the login/signup
+  // screen. It must take priority over whatever is stored in the cloud profile,
+  // otherwise switching modes (e.g. explore → business) at login is ignored.
   const pendingMode = localStorage.getItem(PENDING_MODE_KEY);
   if (isAccountMode(pendingMode)) {
     localStorage.setItem(`${USER_MODE_PREFIX}${userId}`, pendingMode);
+    localStorage.setItem(LAST_MODE_KEY, pendingMode);
     localStorage.removeItem(PENDING_MODE_KEY);
     return pendingMode;
+  }
+
+  // No pending selection — honour the cloud profile value and sync it locally.
+  if (cloudMode && isAccountMode(cloudMode)) {
+    localStorage.setItem(`${USER_MODE_PREFIX}${userId}`, cloudMode);
+    localStorage.setItem(LAST_MODE_KEY, cloudMode);
+    return cloudMode;
   }
 
   const savedMode = localStorage.getItem(`${USER_MODE_PREFIX}${userId}`);

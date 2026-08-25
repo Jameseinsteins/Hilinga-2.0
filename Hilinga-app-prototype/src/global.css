@@ -1605,7 +1605,8 @@ ul, ol { list-style: none; }
 .business-app-content { flex: 1; overflow-x: hidden; overflow-y: auto; }
 .business-screen { width: 100%; max-width: 720px; min-height: 100%; margin: 0 auto; padding: 22px 18px 40px; display: flex; flex-direction: column; gap: 22px; }
 .business-topbar, .business-page-header { display: flex; flex-direction: column; gap: 4px; }
-.business-topbar { position: relative; padding-right: 58px; }
+.business-topbar { position: relative; padding-right: 106px; }
+.business-topbar-actions { position: absolute; top: 3px; right: 0; display: flex; gap: 6px; }
 .business-overline, .business-page-header > span, .business-section-heading > div > span { color: var(--business-accent); font-size: 10px; font-weight: 900; letter-spacing: 1.15px; }
 .business-topbar h1, .business-page-header h1 { font-size: 28px; line-height: 34px; letter-spacing: -.6px; }
 .business-topbar p, .business-page-header p { color: var(--c-body); font-size: 13px; line-height: 19px; }
@@ -1664,14 +1665,14 @@ ul, ol { list-style: none; }
 .business-settings-card .business-logout { color: var(--c-red); }
 .business-settings-card .business-logout small { color: #9B7774; }
 .business-tab-dock { position: relative; z-index: 20; flex-shrink: 0; padding: 0 10px max(8px, env(safe-area-inset-bottom)); border-top: 1px solid #DCE6E0; background: rgba(255,255,255,.97); box-shadow: 0 -8px 24px rgba(24,69,45,.07); }
-.business-tab-dock > div { width: 100%; max-width: 720px; min-height: 68px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1.25fr 74px 1fr 1fr; align-items: end; }
-.business-tab { min-width: 0; height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--c-muted); }
+.business-tab-dock > div { width: 100%; max-width: 720px; min-height: 68px; margin: 0 auto; display: flex; flex-direction: row; align-items: stretch; }
+.business-tab { min-width: 0; flex: 1; height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--c-muted); }
 .business-tab span:last-child { max-width: 100%; overflow: hidden; font-size: 8px; font-weight: 850; letter-spacing: .15px; text-overflow: ellipsis; white-space: nowrap; }
 .business-tab.selected { color: var(--business-accent); }
 .business-tab.selected::before { content: ''; position: absolute; top: 0; width: 30px; height: 3px; border-radius: 0 0 4px 4px; background: var(--business-accent); }
-.business-create-tab { position: relative; height: 70px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 2px; color: var(--business-accent); }
-.business-create-tab > span { width: 58px; height: 58px; margin-top: -21px; display: flex; align-items: center; justify-content: center; border: 5px solid var(--c-canvas); border-radius: 50%; background: linear-gradient(145deg, #B47A39, #835421); color: white; box-shadow: 0 8px 19px rgba(107,68,27,.3); }
-.business-create-tab small { font-size: 8px; font-weight: 900; letter-spacing: .5px; }
+.business-create-tab { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding-bottom: 6px; gap: 2px; color: var(--business-accent); }
+.business-create-tab > span { width: 54px; height: 54px; position: absolute; top: -14px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; border: 4px solid var(--c-canvas); border-radius: 50%; background: linear-gradient(145deg, #B47A39, #835421); color: white; box-shadow: 0 8px 19px rgba(107,68,27,.3); }
+.business-create-tab small { font-size: 8px; font-weight: 900; letter-spacing: .5px; line-height: 1; }
 .business-modal-backdrop { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: flex-end; justify-content: center; background: rgba(6,28,20,.48); animation: fadeIn .18s ease-out; }
 .business-create-sheet { width: 100%; max-width: 720px; max-height: 92vh; overflow-y: auto; display: flex; flex-direction: column; gap: 17px; padding: 9px 20px max(24px, env(safe-area-inset-bottom)); border-radius: 28px 28px 0 0; background: var(--c-canvas); animation: slideUp .23s ease-out; }
 .business-sheet-handle { align-self: center; width: 42px; height: 5px; border-radius: 999px; background: #C8D2CC; }
@@ -2218,4 +2219,126 @@ ul, ol { list-style: none; }
   overflow: hidden;
   clip: rect(0,0,0,0);
   white-space: nowrap;
+}
+
+/* ── Tourist Passport ── */
+.passport-card, .passport-visits { display: flex; flex-direction: column; gap: 16px; padding: 20px; border: 1px solid #DCE9E0; border-radius: 24px; background: linear-gradient(145deg, #F7FCF8, #FFFFFF 68%); box-shadow: 0 10px 30px rgba(24,69,45,.07); }
+.passport-loading { min-height: 120px; align-items: center; justify-content: center; color: var(--c-body); }
+.passport-load-error { min-height: 190px; align-items: center; justify-content: center; text-align: center; }
+.passport-load-error > span { width: 54px; height: 54px; display: flex; align-items: center; justify-content: center; border-radius: 18px; background: #FFF0ED; color: #A2443C; }
+.passport-load-error > strong { font-size: 16px; }
+.passport-load-error > p { max-width: 360px; color: var(--c-body); font-size: 11px; line-height: 17px; }
+.passport-load-error > button { min-height: 40px; padding: 0 18px; border-radius: 11px; font-size: 11px; font-weight: 850; }
+.passport-heading, .passport-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.passport-heading > div, .passport-section-heading > div { display: flex; flex-direction: column; gap: 3px; }
+.passport-kicker { color: #B27128; font-size: 9px; font-weight: 900; letter-spacing: 1.05px; }
+.passport-heading h3, .passport-section-heading h3 { font-size: 22px; line-height: 27px; letter-spacing: -.4px; }
+.passport-heading p { color: var(--c-body); font-size: 11px; line-height: 17px; }
+.passport-status { display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; border-radius: 999px; background: #FFF2DE; color: #9B652A; font-size: 9px; font-weight: 900; white-space: nowrap; }
+.passport-status.active { background: #E7F6EC; color: #26734A; }
+.passport-status span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.passport-qr-stage { min-width: 240px; min-height: 258px; align-self: center; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 12px 14px 10px; border: 1px solid #DCE9E0; border-radius: 19px; background: white; }
+.passport-qr-stage img { width: 210px; height: 210px; image-rendering: pixelated; }
+.passport-qr-stage strong { color: var(--c-green-dark); font-size: 11px; letter-spacing: 1px; }
+.passport-qr-feedback { width: 210px; min-height: 210px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; color: var(--c-body); font-size: 10px; text-align: center; }
+.passport-qr-error { padding: 18px; color: #A2443C; line-height: 15px; }
+.passport-qr-error button { min-height: 34px; padding: 0 13px; border: 1px solid #E4C0BA; border-radius: 9px; background: #FFF5F2; color: #8F3932; font-size: 10px; font-weight: 850; }
+.passport-identity { display: flex; align-items: center; gap: 11px; padding: 12px; border-radius: 15px; background: rgba(226,243,231,.65); }
+.passport-avatar { width: 44px; height: 44px; flex: 0 0 44px; overflow: hidden; display: flex; align-items: center; justify-content: center; border-radius: 14px; background: #D8EEDF; color: var(--c-green); }
+.passport-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.passport-identity > div:last-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.passport-identity strong { color: var(--c-ink); font-size: 14px; }
+.passport-identity span { overflow: hidden; color: var(--c-body); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.passport-identity small { display: inline-flex; align-items: center; gap: 3px; color: #26734A; font-size: 9px; font-weight: 850; }
+.passport-actions { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 7px; }
+.passport-actions button, .passport-consent button, .passport-details button { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 1px solid #D5E4DA; border-radius: 12px; background: white; color: var(--c-green-dark); font-size: 10px; font-weight: 850; }
+.passport-actions .passport-primary, .passport-primary { border-color: var(--c-green); background: var(--c-green); color: white; }
+.passport-actions button:disabled, .passport-consent button:disabled, .passport-details button:disabled, .passport-danger-link:disabled, .business-scan-button:disabled { cursor: not-allowed; opacity: .55; }
+.passport-danger-link { align-self: center; color: #A2443C; font-size: 10px; font-weight: 800; }
+.passport-message { margin: 0; padding: 9px 11px; border-radius: 10px; background: #FFF5E5; color: #7A5B2D; font-size: 11px; line-height: 16px; }
+.passport-details-toggle { display: flex; align-items: center; justify-content: space-between; min-height: 42px; padding: 0 2px; border-top: 1px solid #E2ECE5; color: var(--c-body); font-size: 11px; font-weight: 850; }
+.passport-details-toggle span { display: inline-flex; align-items: center; gap: 7px; }
+.passport-details { display: flex; flex-direction: column; gap: 12px; padding-top: 2px; }
+.passport-details > p, .passport-consent p { color: var(--c-body); font-size: 11px; line-height: 17px; }
+.passport-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.passport-form-grid label, .business-token-field { display: flex; flex-direction: column; gap: 6px; color: var(--c-ink); font-size: 10px; font-weight: 850; }
+.passport-form-grid input, .business-token-field input { min-height: 42px; padding: 0 11px; border: 1px solid var(--c-line); border-radius: 11px; background: white; color: var(--c-ink); outline: none; }
+.passport-consent { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 8px 4px 2px; text-align: center; }
+.passport-consent-icon { width: 66px; height: 66px; display: flex; align-items: center; justify-content: center; border-radius: 22px; background: #E5F4E9; color: var(--c-green); }
+.passport-consent h4 { font-size: 18px; }
+.passport-consent-list { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding: 11px; border-radius: 13px; background: white; color: var(--c-body); font-size: 10px; text-align: left; }
+.passport-consent-list span { display: inline-flex; align-items: center; gap: 5px; }
+.passport-consent-list .material-symbols-outlined { color: var(--c-green); }
+.passport-visits { gap: 12px; padding: 18px 20px; background: white; }
+.passport-section-heading > span { min-width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: var(--c-pale); color: var(--c-green-dark); font-size: 11px; font-weight: 900; }
+.passport-section-heading > div > span { color: var(--c-muted); font-size: 9px; font-weight: 900; letter-spacing: .9px; }
+.passport-empty { display: flex; align-items: center; gap: 10px; min-height: 76px; padding: 13px; border-radius: 13px; background: var(--c-chip); color: var(--c-body); font-size: 11px; line-height: 17px; }
+.passport-empty .material-symbols-outlined { color: var(--c-green); }
+.passport-visits-error { background: #FFF5F2; color: #8F3932; }
+.passport-visits-error .material-symbols-outlined { color: #A2443C; }
+.passport-visit-list { display: flex; flex-direction: column; }
+.passport-visit-list article { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 9px; min-height: 58px; border-bottom: 1px solid #EDF2EE; }
+.passport-visit-list article:last-child { border-bottom: 0; }
+.passport-visit-icon { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: #EDF7EF; color: var(--c-green); }
+.passport-visit-list article > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.passport-visit-list strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.passport-visit-list span { color: var(--c-body); font-size: 10px; }
+.passport-visit-list article > .material-symbols-outlined { color: var(--c-green); }
+.passport-fullscreen { position: fixed; inset: 0; z-index: 1200; display: flex; align-items: center; justify-content: center; padding: 22px; background: rgba(8,34,23,.88); }
+.passport-fullscreen-inner { position: relative; width: min(100%, 390px); display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 27px 20px 24px; border-radius: 26px; background: white; text-align: center; }
+.passport-fullscreen-inner h2 { font-size: 22px; }
+.passport-fullscreen-inner img { width: min(72vw, 280px); height: min(72vw, 280px); image-rendering: pixelated; }
+.passport-fullscreen-inner > strong { color: var(--c-green-dark); letter-spacing: 1px; }
+.passport-fullscreen-inner p { color: var(--c-body); font-size: 11px; }
+.passport-close { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 11px; background: var(--c-chip); color: var(--c-body); }
+
+/* ── Business Visitors ── */
+.business-visitors-screen { width: 100%; max-width: 720px; min-height: 100%; margin: 0 auto; padding: 22px 18px 40px; display: flex; flex-direction: column; gap: 18px; }
+.business-scan-hero { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 19px; border: 1px solid #E2D4BB; border-radius: 19px; background: linear-gradient(135deg, #FFF9ED, #FFF3DA); }
+.business-scan-hero > div { display: flex; flex-direction: column; gap: 4px; }
+.business-scan-hero h2 { color: #4D3217; font-size: 19px; line-height: 24px; }
+.business-scan-hero p { max-width: 420px; color: #856849; font-size: 11px; line-height: 17px; }
+.business-scan-button { flex-shrink: 0; min-height: 44px; display: inline-flex; align-items: center; gap: 7px; padding: 0 14px; border-radius: 12px; background: #B6752A; color: white; font-size: 11px; font-weight: 900; }
+.business-visitor-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.business-visitor-stats article { display: flex; flex-direction: column; gap: 3px; padding: 14px; border: 1px solid #E1E9E3; border-radius: 16px; background: white; }
+.business-visitor-stats span { color: var(--c-muted); font-size: 9px; font-weight: 850; text-transform: uppercase; }
+.business-visitor-stats strong { font-size: 25px; }
+.business-visitor-stats small { color: var(--c-body); font-size: 9px; }
+.business-visitor-list-card { display: flex; flex-direction: column; gap: 12px; padding: 17px; border: 1px solid #E1E9E3; border-radius: 18px; background: white; }
+.business-logbook-loading { min-height: 110px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; color: var(--c-body); font-size: 11px; }
+.business-card-heading select { min-height: 34px; padding: 0 8px; border: 1px solid var(--c-line); border-radius: 9px; background: var(--c-chip); color: var(--c-body); font-size: 10px; font-weight: 800; }
+.business-visitor-table { display: flex; flex-direction: column; }
+.business-visitor-table article { display: grid; grid-template-columns: 38px minmax(0,1fr) auto; align-items: center; gap: 10px; min-height: 67px; border-bottom: 1px solid #EDF2EE; }
+.business-visitor-table article:last-child { border-bottom: 0; }
+.business-visitor-avatar { width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; border-radius: 13px; background: #ECF5EE; color: var(--c-green); }
+.business-visitor-table article > div:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.business-visitor-table strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.business-visitor-table article span, .business-visitor-table time span { color: var(--c-body); font-size: 10px; }
+.business-visitor-table time { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.business-visitor-message { margin: 0; padding: 10px 12px; border-radius: 11px; background: #FFF5E5; color: #7A5B2D; font-size: 11px; line-height: 17px; }
+.business-scanner-sheet { gap: 15px; }
+.business-camera-frame { position: relative; min-height: 290px; overflow: hidden; display: flex; align-items: center; justify-content: center; border-radius: 17px; background: #0D261C; }
+.business-camera-frame video { width: 100%; height: 290px; object-fit: cover; }
+.business-camera-frame p { position: absolute; left: 14px; right: 14px; bottom: 11px; padding: 8px; border-radius: 8px; background: rgba(0,0,0,.6); color: white; font-size: 10px; text-align: center; }
+.business-camera-reticle { position: absolute; width: 170px; height: 170px; border: 3px solid #F4C980; border-radius: 18px; box-shadow: 0 0 0 999px rgba(0,0,0,.18); }
+.business-camera-unavailable { min-height: 150px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; border-radius: 16px; background: #ECF5EE; color: var(--c-green); text-align: center; }
+.business-camera-unavailable strong { color: var(--c-ink); font-size: 14px; }
+.business-camera-unavailable span { max-width: 290px; color: var(--c-body); font-size: 11px; line-height: 16px; }
+.business-tourist-result { display: flex; align-items: center; gap: 11px; padding: 13px; border: 1px solid #BFE2C8; border-radius: 14px; background: #F1FAF3; }
+.business-result-check { width: 35px; height: 35px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--c-green); color: white; }
+.business-tourist-result > div:last-child { display: flex; flex-direction: column; gap: 2px; }
+.business-tourist-result > div:last-child > span { color: var(--c-green); font-size: 9px; font-weight: 900; letter-spacing: .7px; }
+.business-tourist-result strong { font-size: 15px; }
+.business-tourist-result p, .business-tourist-result small { color: var(--c-body); font-size: 10px; }
+.business-tab-dock > div { grid-template-columns: 1fr 1.15fr 1.05fr 66px 1fr 1fr; }
+
+@media (max-width: 540px) {
+  .passport-actions { grid-template-columns: 1fr 1fr; }
+  .passport-actions .passport-primary { grid-column: 1 / -1; }
+  .passport-consent-list, .passport-form-grid { grid-template-columns: 1fr; }
+  .business-scan-hero { align-items: stretch; flex-direction: column; }
+  .business-scan-button { justify-content: center; }
+  .business-visitor-stats strong { font-size: 20px; }
+  .business-tab-dock > div { grid-template-columns: repeat(3, 1fr) 66px repeat(2, 1fr); }
+  .business-tab span:last-child { font-size: 7px; letter-spacing: 0; }
 }

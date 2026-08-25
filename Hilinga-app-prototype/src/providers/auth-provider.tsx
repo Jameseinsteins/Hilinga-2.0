@@ -22,6 +22,9 @@ import {
   isFirebaseConfigured,
   isFirebaseStorageEnabled,
 } from "@/lib/firebase";
+import { resolveAccountMode } from "@/lib/account-mode";
+import { hasBusinessPage } from "@/lib/business-content";
+import { ensureTouristPassport } from "@/lib/tourist-passport";
 import type { CloudProfile, CloudProfileInput } from "@/types/profile";
 
 type OnboardingProfile = Omit<CloudProfileInput, "id" | "avatar_path"> & {
@@ -69,7 +72,44 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setProfileLoading(true);
     setError(null);
     try {
-      const nextProfile = await getCloudProfile(userId);
+      let nextProfile = await getCloudProfile(userId);
+      if (nextProfile && !nextProfile.account_mode) {
+        const localMode = resolveAccountMode(userId);
+        const migratedMode = localMode === "business" || await hasBusinessPage(userId).catch(() => false)
+          ? "business"
+          : "explore";
+        nextProfile = await saveCloudProfile({
+          id: nextProfile.id,
+          account_mode: migratedMode,
+          display_name: nextProfile.display_name,
+          avatar_path: nextProfile.avatar_path,
+          interests: nextProfile.interests,
+          language: nextProfile.language,
+          budget_min: nextProfile.budget_min,
+          budget_max: nextProfile.budget_max,
+          notifications_enabled: nextProfile.notifications_enabled,
+          onboarding_completed: nextProfile.onboarding_completed,
+        }, nextProfile);
+      } else if (nextProfile) {
+        // If the user explicitly chose a different mode at login (pending mode),
+        // resolveAccountMode will return it and consume the pending key. Persist
+        // it to the cloud so subsequent logins don't revert to the old mode.
+        const effectiveMode = resolveAccountMode(userId, nextProfile.account_mode);
+        if (effectiveMode !== nextProfile.account_mode) {
+          nextProfile = await saveCloudProfile({
+            id: nextProfile.id,
+            account_mode: effectiveMode,
+            display_name: nextProfile.display_name,
+            avatar_path: nextProfile.avatar_path,
+            interests: nextProfile.interests,
+            language: nextProfile.language,
+            budget_min: nextProfile.budget_min,
+            budget_max: nextProfile.budget_max,
+            notifications_enabled: nextProfile.notifications_enabled,
+            onboarding_completed: nextProfile.onboarding_completed,
+          }, nextProfile);
+        }
+      }
       setProfile(nextProfile);
       if (nextProfile?.avatar_path && isFirebaseStorageEnabled) {
         try {
@@ -138,6 +178,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
         const saved = await saveCloudProfile({
           id: userId,
+          account_mode: resolveAccountMode(userId, profile?.account_mode),
           display_name: input.display_name.trim(),
           avatar_path: avatarPath,
           interests: input.interests,
@@ -158,6 +199,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
           }
         }
         setAvatarUrl(localAvatarUrl ?? null);
+        if (resolveAccountMode(userId, saved.account_mode) !== "business") {
+          void ensureTouristPassport(userId, saved.display_name, localAvatarUrl ?? "")
+            .catch((passportError) => console.warn("[tourist-passport] Could not initialize passport:", passportError));
+        }
         console.info("[profile] save completed", { durationMs: Math.round(performance.now() - startedAt) });
       } catch (nextError) {
         console.error("[profile] save failed", nextError);

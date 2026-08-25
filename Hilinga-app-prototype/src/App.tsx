@@ -17,7 +17,7 @@ function AppContent() {
   // onboarding; the profile cache/cloud request can recover on a later load.
   if (!profile && error) return resolveAccountMode(user.uid) === "business" ? <BusinessApp /> : <HilingaApp />;
   if (!profile?.onboarding_completed) return <OnboardingScreen />;
-  if (resolveAccountMode(user.uid) === "business") return <BusinessApp />;
+  if (resolveAccountMode(user.uid, profile.account_mode) === "business") return <BusinessApp />;
   return <HilingaApp />;
 }
 

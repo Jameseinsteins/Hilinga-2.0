@@ -7,6 +7,8 @@ import {
 } from "firebase/auth";
 
 import { auth } from "@/lib/firebase";
+import { initializeCloudProfile } from "@/lib/cloud-profile";
+import type { AccountMode } from "@/lib/account-mode";
 
 export async function signInWithEmail(email: string, password: string) {
   const credential = await signInWithEmailAndPassword(auth, email, password);
@@ -16,8 +18,9 @@ export async function signInWithEmail(email: string, password: string) {
   }
 }
 
-export async function createEmailAccount(email: string, password: string) {
+export async function createEmailAccount(email: string, password: string, accountMode: AccountMode) {
   const credential = await createUserWithEmailAndPassword(auth, email, password);
+  await initializeCloudProfile(credential.user.uid, "", accountMode);
   await sendEmailVerification(credential.user);
   await signOut(auth);
 }

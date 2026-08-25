@@ -9,7 +9,139 @@ service cloud.firestore {
     match /profiles/{userId} {
       allow read, delete: if isOwner(userId);
       allow create, update: if isOwner(userId)
-        && request.resource.data.id == userId;
+        && request.resource.data.id == userId
+        && (!('account_mode' in request.resource.data)
+          || request.resource.data.account_mode in ['explore', 'business']);
+    }
+
+    match /businesses/{userId} {
+      allow read: if request.auth != null;
+      allow create, update: if isOwner(userId)
+        && request.resource.data.keys().hasOnly([
+          'ownerUid', 'name', 'businessScale', 'category', 'location',
+          'phone', 'email', 'hours', 'about', 'coverUrl', 'logoUrl',
+          'latitude', 'longitude', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.ownerUid == userId
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 120
+        && request.resource.data.businessScale in ['Small business', 'Big enterprise']
+        && request.resource.data.category is string
+        && request.resource.data.category.size() > 0
+        && request.resource.data.category.size() <= 80
+        && request.resource.data.location is string
+        && request.resource.data.location.size() > 0
+        && request.resource.data.location.size() <= 160
+        && request.resource.data.phone is string
+        && request.resource.data.phone.size() <= 40
+        && request.resource.data.email is string
+        && request.resource.data.email.size() <= 160
+        && request.resource.data.hours is string
+        && request.resource.data.hours.size() <= 160
+        && request.resource.data.about is string
+        && request.resource.data.about.size() <= 1500
+        && request.resource.data.coverUrl is string
+        && request.resource.data.coverUrl.size() <= 450000
+        && request.resource.data.logoUrl is string
+        && request.resource.data.logoUrl.size() <= 220000
+        && request.resource.data.latitude is number
+        && request.resource.data.latitude >= -90
+        && request.resource.data.latitude <= 90
+        && request.resource.data.longitude is number
+        && request.resource.data.longitude >= -180
+        && request.resource.data.longitude <= 180
+        && request.resource.data.createdAt is string
+        && request.resource.data.updatedAt is string;
+      allow delete: if isOwner(userId);
+    }
+
+    function isBusinessAccount() {
+      return request.auth != null
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.account_mode == 'business';
+    }
+
+    match /touristProfiles/{touristId} {
+      allow get: if isOwner(touristId) || isBusinessAccount();
+      allow list: if false;
+      allow create, update: if isOwner(touristId)
+        && request.resource.data.ownerUid == touristId
+        && request.resource.data.keys().hasOnly([
+          'ownerUid', 'touristCode', 'firstName', 'lastName', 'profilePhoto',
+          'nationality', 'country', 'region', 'province', 'city',
+          'verificationStatus', 'qrToken', 'qrStatus', 'consentEnabled',
+          'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.touristCode is string
+        && request.resource.data.firstName is string
+        && request.resource.data.lastName is string
+        && request.resource.data.country is string
+        && request.resource.data.qrToken is string
+        && request.resource.data.qrToken.size() >= 24
+        && request.resource.data.qrToken.size() <= 128
+        && request.resource.data.qrStatus in ['active', 'disabled', 'revoked']
+        && request.resource.data.consentEnabled is bool
+        && request.resource.data.createdAt is string
+        && request.resource.data.updatedAt is string;
+    }
+
+    match /touristQrCodes/{token} {
+      allow get: if request.auth != null
+        && (isBusinessAccount() || resource.data.ownerUid == request.auth.uid);
+      allow list: if false;
+      allow create: if request.auth != null
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['ownerUid', 'status', 'createdAt', 'updatedAt'])
+        && request.resource.data.status in ['active', 'disabled', 'revoked']
+        && request.resource.data.createdAt is string
+        && request.resource.data.updatedAt is string;
+      allow update: if request.auth != null
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.keys().hasOnly(['ownerUid', 'status', 'createdAt', 'updatedAt'])
+        && request.resource.data.status in ['active', 'disabled', 'revoked']
+        && request.resource.data.createdAt is string
+        && request.resource.data.updatedAt is string;
+      allow delete: if false;
+    }
+
+    match /touristVisitLogs/{visitId} {
+      allow read: if request.auth != null
+        && (resource.data.businessId == request.auth.uid || resource.data.touristId == request.auth.uid);
+      allow create: if isBusinessAccount()
+        && request.resource.data.businessId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'touristId', 'touristCode', 'touristName', 'touristCountry',
+          'touristProvince', 'businessId', 'businessName', 'businessLocation',
+          'qrToken', 'scannedBy', 'visitedAt', 'scanMethod', 'status', 'createdAt'
+        ])
+        && request.resource.data.touristId is string
+        && request.resource.data.touristCode is string
+        && request.resource.data.businessName is string
+        && request.resource.data.businessName.size() > 0
+        && request.resource.data.businessName.size() <= 120
+        && request.resource.data.businessLocation is string
+        && request.resource.data.businessLocation.size() > 0
+        && request.resource.data.businessLocation.size() <= 160
+        && request.resource.data.qrToken is string
+        && request.resource.data.qrToken.size() >= 24
+        && request.resource.data.qrToken.size() <= 128
+        && request.resource.data.scannedBy == request.auth.uid
+        && request.resource.data.scanMethod in ['camera', 'manual']
+        && request.resource.data.status == 'recorded'
+        && request.resource.data.visitedAt is string
+        && request.resource.data.createdAt is string
+        && request.resource.data.businessName == get(/databases/$(database)/documents/businesses/$(request.auth.uid)).data.name
+        && request.resource.data.businessLocation == get(/databases/$(database)/documents/businesses/$(request.auth.uid)).data.location
+        && request.resource.data.touristId == get(/databases/$(database)/documents/touristQrCodes/$(request.resource.data.qrToken)).data.ownerUid
+        && get(/databases/$(database)/documents/touristQrCodes/$(request.resource.data.qrToken)).data.status == 'active'
+        && request.resource.data.qrToken == get(/databases/$(database)/documents/touristProfiles/$(request.resource.data.touristId)).data.qrToken
+        && get(/databases/$(database)/documents/touristProfiles/$(request.resource.data.touristId)).data.qrStatus == 'active'
+        && get(/databases/$(database)/documents/touristProfiles/$(request.resource.data.touristId)).data.consentEnabled == true
+        && request.resource.data.touristCode == get(/databases/$(database)/documents/touristProfiles/$(request.resource.data.touristId)).data.touristCode
+        && request.resource.data.touristCountry == get(/databases/$(database)/documents/touristProfiles/$(request.resource.data.touristId)).data.country
+        && request.resource.data.touristProvince == get(/databases/$(database)/documents/touristProfiles/$(request.resource.data.touristId)).data.province;
+      allow update, delete: if false;
     }
 
     match /users/{userId}/savedPlaces/{placeId} {
@@ -121,7 +253,7 @@ service cloud.firestore {
         && request.resource.data.businessLocation is string
         && request.resource.data.businessLocation.size() <= 160
         && request.resource.data.businessLogoUrl is string
-        && request.resource.data.businessLogoUrl.size() <= 2000
+        && request.resource.data.businessLogoUrl.size() <= 220000
         && request.resource.data.category in [
           'Photos & Videos', 'Events', 'Promotions'
         ]
@@ -132,8 +264,8 @@ service cloud.firestore {
         && request.resource.data.detail.size() <= 1500
         && request.resource.data.mediaUrl is string
         && request.resource.data.mediaUrl.size() > 0
-        && request.resource.data.mediaUrl.size() <= 2000
-        && request.resource.data.mediaType in ['image', 'video']
+        && request.resource.data.mediaUrl.size() <= 700000
+        && request.resource.data.mediaType == 'image'
         && request.resource.data.createdAt is string;
       allow update: if false;
       allow delete: if request.auth != null

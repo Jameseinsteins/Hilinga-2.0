@@ -14,9 +14,13 @@ import hilingaLogo from "@/assets/images/hilinga/hilinga-logo.png";
 
 type Mode = "login" | "signup" | "forgot";
 
+function entryAccountMode(): AccountMode {
+  return new URLSearchParams(window.location.search).has("tourist_token") ? "business" : getLastAccountMode();
+}
+
 export function AuthScreen({ configured }: { configured: boolean }) {
   const [mode, setMode] = useState<Mode>("login");
-  const [accountMode, setAccountMode] = useState<AccountMode>(getLastAccountMode);
+  const [accountMode, setAccountMode] = useState<AccountMode>(entryAccountMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -38,7 +42,7 @@ export function AuthScreen({ configured }: { configured: boolean }) {
       if (mode === "login") {
         await signInWithEmail(cleanEmail, password);
       } else if (mode === "signup") {
-        await createEmailAccount(cleanEmail, password);
+        await createEmailAccount(cleanEmail, password, accountMode);
         setMessage("Account created. Check your email to confirm your address, then sign in.");
         setMode("login");
       } else {
@@ -58,7 +62,7 @@ export function AuthScreen({ configured }: { configured: boolean }) {
     setMessage(null);
     try {
       selectAccountMode(accountMode);
-      await signInWithGoogle();
+      await signInWithGoogle(accountMode);
     } catch (nextError) {
       setError(readableAuthError(nextError));
     } finally {

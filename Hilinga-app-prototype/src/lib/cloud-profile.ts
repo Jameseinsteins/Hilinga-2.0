@@ -8,6 +8,7 @@ import {
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 
 import { firestore, storage } from "@/lib/firebase";
+import type { AccountMode } from "@/lib/account-mode";
 import type { CloudProfile, CloudProfileInput } from "@/types/profile";
 
 export type AvatarUpload = {
@@ -69,6 +70,25 @@ function cacheProfile(profile: CloudProfile) {
   } catch (error) {
     console.warn("[cloud-profile] Could not cache the profile:", error);
   }
+}
+
+export async function initializeCloudProfile(userId: string, displayName: string, accountMode: AccountMode) {
+  const profileRef = doc(firestore, "profiles", userId);
+  if ((await getDoc(profileRef)).exists()) return;
+  await setDoc(profileRef, {
+    id: userId,
+    account_mode: accountMode,
+    display_name: displayName.trim(),
+    avatar_path: null,
+    interests: [],
+    language: "English",
+    budget_min: null,
+    budget_max: null,
+    notifications_enabled: true,
+    onboarding_completed: false,
+    created_at: serverTimestamp(),
+    updated_at: serverTimestamp(),
+  });
 }
 
 export async function getCloudProfile(userId: string) {

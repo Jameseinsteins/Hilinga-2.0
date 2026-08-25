@@ -1,12 +1,14 @@
 # Hilinga Firebase setup
 
-The app uses Firebase Authentication, Cloud Firestore, and Cloud Storage.
+The app uses Firebase Authentication and Cloud Firestore. Business pages,
+compressed business photos, and feed posts work without Cloud Storage so the
+prototype can stay on Firebase's Spark plan.
 
 ## Enabled services
 
 - Authentication: Email/Password and Google
 - Firestore Database
-- Storage
+- Storage (optional, only for larger files or profile avatars)
 
 Under Authentication > Settings > Authorized domains, add every web hostname
 that will run Hilinga. Add `localhost` for local web development if it is not
@@ -18,10 +20,10 @@ is not a server secret. Never add a service-account private key to the app.
 
 ## Security rules
 
-Install the Firebase CLI, sign in, then deploy the checked-in owner-only rules:
+Install the Firebase CLI, sign in, then deploy the checked-in Firestore rules:
 
 ```sh
-firebase deploy --only firestore:rules,storage
+firebase deploy --only firestore:rules --project hilinga-web-app
 ```
 
 Keep `VITE_FIREBASE_STORAGE_ENABLED=false` until the project's default Cloud
@@ -30,10 +32,12 @@ Then set it to `true` and restart the app. Profile setup still works while
 Storage is disabled; selected photos are session-only until cloud uploads are
 enabled.
 
-Profiles are stored at `profiles/{uid}`. Shared business posts are stored at
-`businessPosts/{postId}`, with their media under `business-posts/{uid}` in
-Cloud Storage. Any authenticated user can read those posts and media, while
-only the owning business account can create or delete them. Saved places and
+Profiles are stored at `profiles/{uid}`, including the account's Explore or
+Business mode so the same experience opens on every device. Public business
+pages are stored at `businesses/{uid}` and shared business posts are stored at
+`businessPosts/{postId}`. Compressed photos are stored directly in those
+Firestore documents. Any authenticated user can read those business pages and
+posts, while only the owning business account can change them. Saved places and
 trip plans are stored under `users/{uid}/savedPlaces/{placeId}` and
 `users/{uid}/tripPlans/{planId}`. Firestore rules allow an authenticated user to
 read and write only their own documents and validate the fields written by the
@@ -57,6 +61,24 @@ above claims and syncs them safely.
 After changing `firestore.rules`, deploy the rules before testing writes from a
 client. No service-account credential or private key belongs in `.env.local`,
 the web bundle, or this repository.
+
+Firestore is authoritative for business pages and posts. Business mode does not
+read or write browser local storage. The free implementation supports compressed
+photos; video posts require a separate file-storage service and are disabled.
+
+Tourist Passport data is stored in `touristProfiles/{uid}` and
+`touristQrCodes/{token}`. Successful business scans create records in
+`touristVisitLogs/{visitId}`. Deploy the checked-in Firestore rules before
+testing this flow: tourist QR documents contain only a revocable token, while
+the tourist profile and visit log hold the authorized display fields.
+
+Set `VITE_PUBLIC_APP_URL` to the public origin of the deployed app before
+building for production. Tourist QR images encode this origin and route an
+authenticated business owner to the Visitors logbook. The app falls back to
+the current browser origin for local development. After a valid scan, one visit
+record updates both the business Visitors logbook and the tourist's My Visits
+list in real time. Repeat scans by the same business within 30 minutes are
+treated as duplicates and do not create another visit.
 
 ## Native Google sign-in
 

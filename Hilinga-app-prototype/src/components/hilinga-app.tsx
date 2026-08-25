@@ -29,8 +29,10 @@ import {
   BusinessPost,
   RegisteredSmallBusiness,
   readPublishedBusinessPosts,
+  readRegisteredBusinesses,
   readRegisteredSmallBusinesses,
   subscribeToPublishedBusinessPosts,
+  subscribeToRegisteredBusinesses,
 } from "@/lib/business-content";
 import {
   CommunityPost,
@@ -42,6 +44,7 @@ import {
 } from "@/lib/community-feed";
 import { useAuth } from "@/providers/auth-provider";
 import { useDatabase } from "@/providers/database-provider";
+import { TouristPassport } from "@/components/tourist-passport";
 
 import explore1 from "@/assets/images/hilinga/explore-1.png";
 import explore2 from "@/assets/images/hilinga/explore-2.png";
@@ -1006,37 +1009,29 @@ function Explore({ initialFilter, initialBusinessId, onFilterHandled, onBusiness
   const [reviewPosting, setReviewPosting] = useState(false);
   const [reviewDeleteTarget, setReviewDeleteTarget] = useState<CommunityPost | null>(null);
 
-  const registeredBusinesses = useMemo<ExploreItem[]>(() => {
-    const businesses: ExploreItem[] = [];
-    for (let index = 0; index < localStorage.length; index += 1) {
-      const key = localStorage.key(index);
-      if (!key?.startsWith("hilinga_business_page_v1:")) continue;
-      try {
-        const page = JSON.parse(localStorage.getItem(key) ?? "{}") as Partial<{
-          name: string; category: string; location: string; about: string; coverUrl: string; logoUrl: string; businessScale: BusinessScale;
-        }>;
-        if (!page.name?.trim() || page.name === "Your business") continue;
-        businesses.push({
-          id: `registered-${key.slice(key.indexOf(":") + 1)}`,
-          name: page.name.trim(),
-          subtitle: page.about?.trim() || `${page.category || "Local business"} registered on Hilinga`,
-          category: page.category?.trim() || "Shopping",
-          kind: "Businesses",
-          savedKind: "Businesses",
-          visits: 0,
-          imageKey: "registered-business",
-          source: page.coverUrl || page.logoUrl || explore4,
-          logoSource: page.logoUrl,
-          latitude: 13.139,
-          longitude: 123.7336,
-          location: page.location?.trim() || "Legazpi City, Albay",
-          businessScale: page.businessScale || "Small business",
-          registered: true,
-        });
-      } catch { /* Ignore incomplete local profiles. */ }
-    }
-    return businesses;
+  const [businessDirectory, setBusinessDirectory] = useState(() => readRegisteredBusinesses());
+  useEffect(() => {
+    const refreshBusinesses = () => setBusinessDirectory([...readRegisteredBusinesses()]);
+    window.addEventListener(BUSINESS_CONTENT_CHANGED_EVENT, refreshBusinesses);
+    return () => window.removeEventListener(BUSINESS_CONTENT_CHANGED_EVENT, refreshBusinesses);
   }, []);
+  const registeredBusinesses = useMemo<ExploreItem[]>(() => businessDirectory.map((page) => ({
+    id: page.id,
+    name: page.name,
+    subtitle: page.about || `${page.category} registered on Hilinga`,
+    category: page.category || "Shopping",
+    kind: "Businesses",
+    savedKind: "Businesses",
+    visits: 0,
+    imageKey: "registered-business",
+    source: page.coverUrl || page.logoUrl || explore4,
+    logoSource: page.logoUrl,
+    latitude: page.latitude,
+    longitude: page.longitude,
+    location: page.location,
+    businessScale: page.businessScale,
+    registered: true,
+  })), [businessDirectory]);
   const allItems = useMemo(() => [...registeredBusinesses, ...catalog], [registeredBusinesses]);
 
   useEffect(() => subscribeToCommunityPosts(
@@ -3057,6 +3052,8 @@ function ProfileScreen({ goPlanner, goExplore, onReset, businessMode }: { goPlan
             </button>
           </div>
 
+          {!businessMode && <TouristPassport />}
+
           <section className="profile-section">
             <div className="profile-section-heading">
               <div><span>Preferences</span><h3>Make Hilinga yours</h3></div>
@@ -3173,6 +3170,20 @@ export function HilingaApp() {
   useEffect(() => {
     getSetting(db, "business_mode").then((mode) => setBusinessMode(mode === "true")).catch(() => setNotice({ title: "Business tools unavailable", message: "Your saved business settings could not be loaded." }));
   }, [db]);
+  useEffect(() => {
+    const unsubscribeBusinesses = subscribeToRegisteredBusinesses(
+      () => undefined,
+      (error) => console.warn("[business-directory] Could not load cloud businesses:", error),
+    );
+    const unsubscribePosts = subscribeToPublishedBusinessPosts(
+      () => undefined,
+      (error) => console.warn("[business-feed] Could not load cloud posts:", error),
+    );
+    return () => {
+      unsubscribeBusinesses();
+      unsubscribePosts();
+    };
+  }, []);
   async function reset() { try { await resetLocalAccount(db); setBusinessMode(false); setTab("Home"); setMapOpen(false); } catch { setNotice({ title: "Reset failed", message: "Your local data could not be reset. Please try again." }); } }
   const handleFilter = useCallback(() => setExploreFilter(null), []);
   const handleBusiness = useCallback(() => setExploreBusinessId(null), []);

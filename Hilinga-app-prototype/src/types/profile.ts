@@ -1,5 +1,6 @@
 export type CloudProfile = {
   id: string;
+  account_mode?: "explore" | "business";
   display_name: string;
   avatar_path: string | null;
   interests: string[];
@@ -15,6 +16,7 @@ export type CloudProfile = {
 export type CloudProfileInput = Pick<
   CloudProfile,
   | "id"
+  | "account_mode"
   | "display_name"
   | "avatar_path"
   | "interests"
