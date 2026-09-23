@@ -40,6 +40,12 @@ export type ItineraryStop = {
   title: string;
   note: string;
   icon: string;
+  id?: string;
+  place?: { latitude: number; longitude: number } | string;
+  durationMinutes?: number;
+  cost?: number;
+  latitude?: number;
+  longitude?: number;
 };
 
 export type ItineraryDay = {

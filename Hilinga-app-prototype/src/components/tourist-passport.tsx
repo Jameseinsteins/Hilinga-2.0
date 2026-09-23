@@ -10,6 +10,7 @@ import {
   type TouristPassport,
   type TouristVisit,
 } from "@/lib/tourist-passport";
+import { generateQrDataUrl, downloadQrDataUrl } from "@/lib/qr-generator";
 
 type QrImageState = "idle" | "generating" | "ready" | "error";
 
@@ -96,13 +97,7 @@ export function ProfileQrCard() {
     setQrImage("");
     setQrImageState("generating");
     setQrError("");
-    void import("qrcode")
-      .then(({ default: QRCode }) => QRCode.toDataURL(touristQrUrl(qrToken), {
-        width: 320,
-        margin: 3,
-        errorCorrectionLevel: "M",
-        color: { dark: "#102f23", light: "#ffffff" },
-      }))
+    void generateQrDataUrl(touristQrUrl(qrToken), { width: 320 })
       .then((image) => {
         if (cancelled) return;
         setQrImage(image);
@@ -169,14 +164,14 @@ export function ProfileQrCard() {
     }
   }
 
-  function downloadQr() {
+  async function downloadQr() {
     if (!qrReady || !passport) return;
-    const link = document.createElement("a");
-    link.href = qrImage;
-    link.download = `${passport.touristCode}-profile-qr.png`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    try {
+      await downloadQrDataUrl(qrImage, `${passport.touristCode}-profile-qr.png`);
+    } catch {
+      // Fallback for edge cases (e.g. https URL with strict CORS) — open in new tab.
+      if (qrImage.startsWith("http")) window.open(qrImage, "_blank", "noopener");
+    }
   }
 
   if (passportLoading) {

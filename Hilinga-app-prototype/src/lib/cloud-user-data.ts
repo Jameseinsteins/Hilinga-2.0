@@ -13,6 +13,7 @@ import type {
   TripPlan,
 } from "@/lib/database";
 import { firestore } from "@/lib/firebase";
+import { isSupabaseConfigured, supabase, withSupabaseTimeout } from "@/lib/supabase";
 
 const FIREBASE_TIMEOUT_MS = 12_000;
 const LEGACY_OWNER_KEY = "legacy_cloud_data_owner";
@@ -194,7 +195,109 @@ function tripDocument(plan: TripPlan) {
   };
 }
 
+// ── Supabase converters ──
+
+function toSupabaseSavedRow(row: CachedSavedItem): Record<string, unknown> {
+  return {
+    id: row.id,
+    user_id: row.userId,
+    title: row.title,
+    subtitle: row.subtitle,
+    kind: row.kind,
+    image_key: row.imageKey,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+    sync_state: row.syncState,
+    deleted: !!row.deleted,
+  };
+}
+
+function fromSupabaseSavedRow(data: Record<string, unknown>): CachedSavedItem {
+  return {
+    id: String(data.id),
+    title: (data.title as string) ?? "",
+    subtitle: (data.subtitle as string) ?? "",
+    kind: (data.kind as SavedKind) ?? "Places",
+    imageKey: (data.image_key as string | null) ?? null,
+    createdAt: (data.created_at as string) ?? new Date().toISOString(),
+    userId: String(data.user_id),
+    updatedAt: (data.updated_at as string) ?? (data.created_at as string) ?? new Date().toISOString(),
+    syncState: (data.sync_state as SyncState) ?? "synced",
+    deleted: Boolean(data.deleted),
+  };
+}
+
+function toSupabaseTripRow(row: CachedTripPlan): Record<string, unknown> {
+  return {
+    id: row.id,
+    user_id: row.userId,
+    title: row.title,
+    preferences: row.preferences as unknown,
+    itinerary: (row.itinerary ?? []) as unknown,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+    sync_state: row.syncState,
+    deleted: !!row.deleted,
+  };
+}
+
+function fromSupabaseTripRow(data: Record<string, unknown>): CachedTripPlan {
+  return {
+    id: String(data.id),
+    title: (data.title as string) ?? "",
+    preferences: (data.preferences as TripPlan["preferences"]) ?? {
+      durationHours: 0,
+      budget: null,
+      transportation: "",
+      interests: [],
+      walkingAbility: "",
+    },
+    itinerary: Array.isArray(data.itinerary) ? (data.itinerary as ItineraryDay[]) : [],
+    createdAt: (data.created_at as string) ?? new Date().toISOString(),
+    userId: String(data.user_id),
+    updatedAt: (data.updated_at as string) ?? (data.created_at as string) ?? new Date().toISOString(),
+    syncState: (data.sync_state as SyncState) ?? "synced",
+    deleted: Boolean(data.deleted),
+  };
+}
+
 async function flushSavedRow(db: IDBDatabase, row: CachedSavedItem) {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      if (row.deleted) {
+        const { error } = await withSupabaseTimeout(
+          supabase.from("saved_places").delete().eq("user_id", row.userId).eq("id", row.id),
+          "Saved-place sync timed out.",
+        );
+        if (error) throw new Error(error.message);
+      } else {
+        const { error } = await withSupabaseTimeout(
+          supabase.from("saved_places").upsert(toSupabaseSavedRow(row) as never, { onConflict: "user_id,id" }),
+          "Saved-place sync timed out.",
+        );
+        if (error) throw new Error(error.message);
+      }
+      if (row.deleted) await deleteRow(db, SAVED_STORE, row.userId, row.id);
+      else await putRow(db, SAVED_STORE, { ...row, syncState: "synced" });
+      return;
+    } catch (error) {
+      console.warn("[cloud-user-data] Supabase saved-place sync failed, trying Firestore:", error);
+      // fall through to Firestore fallback; if Firestore also fails the caller (tryFlush) will defer
+      try {
+        const reference = doc(savedCollection(row.userId), row.id);
+        await withFirebaseTimeout(
+          row.deleted ? deleteDoc(reference) : setDoc(reference, savedDocument(row)),
+          "Saved-place sync timed out.",
+        );
+        if (row.deleted) await deleteRow(db, SAVED_STORE, row.userId, row.id);
+        else await putRow(db, SAVED_STORE, { ...row, syncState: "synced" });
+        return;
+      } catch (fallbackError) {
+        throw fallbackError;
+      }
+    }
+  }
+
   const reference = doc(savedCollection(row.userId), row.id);
   await withFirebaseTimeout(
     row.deleted ? deleteDoc(reference) : setDoc(reference, savedDocument(row)),
@@ -205,6 +308,41 @@ async function flushSavedRow(db: IDBDatabase, row: CachedSavedItem) {
 }
 
 async function flushTripRow(db: IDBDatabase, row: CachedTripPlan) {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      if (row.deleted) {
+        const { error } = await withSupabaseTimeout(
+          supabase.from("trip_plans").delete().eq("user_id", row.userId).eq("id", row.id),
+          "Trip-plan sync timed out.",
+        );
+        if (error) throw new Error(error.message);
+      } else {
+        const { error } = await withSupabaseTimeout(
+          supabase.from("trip_plans").upsert(toSupabaseTripRow(row) as never, { onConflict: "user_id,id" }),
+          "Trip-plan sync timed out.",
+        );
+        if (error) throw new Error(error.message);
+      }
+      if (row.deleted) await deleteRow(db, TRIPS_STORE, row.userId, row.id);
+      else await putRow(db, TRIPS_STORE, { ...row, syncState: "synced" });
+      return;
+    } catch (error) {
+      console.warn("[cloud-user-data] Supabase trip-plan sync failed, trying Firestore:", error);
+      try {
+        const reference = doc(tripsCollection(row.userId), row.id);
+        await withFirebaseTimeout(
+          row.deleted ? deleteDoc(reference) : setDoc(reference, tripDocument(row)),
+          "Trip-plan sync timed out.",
+        );
+        if (row.deleted) await deleteRow(db, TRIPS_STORE, row.userId, row.id);
+        else await putRow(db, TRIPS_STORE, { ...row, syncState: "synced" });
+        return;
+      } catch (fallbackError) {
+        throw fallbackError;
+      }
+    }
+  }
+
   const reference = doc(tripsCollection(row.userId), row.id);
   await withFirebaseTimeout(
     row.deleted ? deleteDoc(reference) : setDoc(reference, tripDocument(row)),
@@ -236,21 +374,52 @@ export async function getSavedItems(
   const cached = await userRows<CachedSavedItem>(db, SAVED_STORE, userId);
   await tryFlush(cached.filter((row) => row.syncState === "pending"), (row) => flushSavedRow(db, row));
 
-  try {
-    const snapshot = await withFirebaseTimeout(
-      getDocs(savedCollection(userId)),
-      "Saved places are taking too long to load.",
-    );
-    const remote = snapshot.docs.map((item) => ({
-      ...(item.data() as Omit<SavedItem, "id">),
-      id: item.id,
-      userId,
-      updatedAt: item.data().createdAt as string,
-      syncState: "synced" as const,
-    }));
-    await replaceSyncedRows(db, SAVED_STORE, userId, remote);
-  } catch (error) {
-    deferCloudSync(error, "[cloud-user-data] Using cached saved places.");
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await withSupabaseTimeout(
+        supabase.from("saved_places").select("*").eq("user_id", userId),
+        "Saved places are taking too long to load.",
+      );
+      if (error) throw new Error(error.message);
+      const remote = (data as Record<string, unknown>[] | null ?? []).map(fromSupabaseSavedRow);
+      // remote rows are already synced; put deleted flag handling done by replaceSyncedRows + final filter
+      await replaceSyncedRows(db, SAVED_STORE, userId, remote as Array<CachedSavedItem | CachedTripPlan>);
+    } catch (error) {
+      console.warn("[cloud-user-data] Supabase saved-places fetch failed, trying Firestore:", error);
+      try {
+        const snapshot = await withFirebaseTimeout(
+          getDocs(savedCollection(userId)),
+          "Saved places are taking too long to load.",
+        );
+        const remote = snapshot.docs.map((item) => ({
+          ...(item.data() as Omit<SavedItem, "id">),
+          id: item.id,
+          userId,
+          updatedAt: item.data().createdAt as string,
+          syncState: "synced" as const,
+        }));
+        await replaceSyncedRows(db, SAVED_STORE, userId, remote as Array<CachedSavedItem | CachedTripPlan>);
+      } catch (fallbackError) {
+        deferCloudSync(fallbackError, "[cloud-user-data] Using cached saved places.");
+      }
+    }
+  } else {
+    try {
+      const snapshot = await withFirebaseTimeout(
+        getDocs(savedCollection(userId)),
+        "Saved places are taking too long to load.",
+      );
+      const remote = snapshot.docs.map((item) => ({
+        ...(item.data() as Omit<SavedItem, "id">),
+        id: item.id,
+        userId,
+        updatedAt: item.data().createdAt as string,
+        syncState: "synced" as const,
+      }));
+      await replaceSyncedRows(db, SAVED_STORE, userId, remote as Array<CachedSavedItem | CachedTripPlan>);
+    } catch (error) {
+      deferCloudSync(error, "[cloud-user-data] Using cached saved places.");
+    }
   }
 
   return (await userRows<CachedSavedItem>(db, SAVED_STORE, userId))
@@ -308,21 +477,51 @@ export async function getTripPlans(db: IDBDatabase, userId: string): Promise<Tri
   const cached = await userRows<CachedTripPlan>(db, TRIPS_STORE, userId);
   await tryFlush(cached.filter((row) => row.syncState === "pending"), (row) => flushTripRow(db, row));
 
-  try {
-    const snapshot = await withFirebaseTimeout(
-      getDocs(tripsCollection(userId)),
-      "Trip plans are taking too long to load.",
-    );
-    const remote = snapshot.docs.map((item) => ({
-      ...(item.data() as Omit<TripPlan, "id">),
-      id: item.id,
-      userId,
-      updatedAt: item.data().createdAt as string,
-      syncState: "synced" as const,
-    }));
-    await replaceSyncedRows(db, TRIPS_STORE, userId, remote);
-  } catch (error) {
-    deferCloudSync(error, "[cloud-user-data] Using cached trip plans.");
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await withSupabaseTimeout(
+        supabase.from("trip_plans").select("*").eq("user_id", userId),
+        "Trip plans are taking too long to load.",
+      );
+      if (error) throw new Error(error.message);
+      const remote = (data as Record<string, unknown>[] | null ?? []).map(fromSupabaseTripRow);
+      await replaceSyncedRows(db, TRIPS_STORE, userId, remote as Array<CachedSavedItem | CachedTripPlan>);
+    } catch (error) {
+      console.warn("[cloud-user-data] Supabase trip-plans fetch failed, trying Firestore:", error);
+      try {
+        const snapshot = await withFirebaseTimeout(
+          getDocs(tripsCollection(userId)),
+          "Trip plans are taking too long to load.",
+        );
+        const remote = snapshot.docs.map((item) => ({
+          ...(item.data() as Omit<TripPlan, "id">),
+          id: item.id,
+          userId,
+          updatedAt: item.data().createdAt as string,
+          syncState: "synced" as const,
+        }));
+        await replaceSyncedRows(db, TRIPS_STORE, userId, remote as Array<CachedSavedItem | CachedTripPlan>);
+      } catch (fallbackError) {
+        deferCloudSync(fallbackError, "[cloud-user-data] Using cached trip plans.");
+      }
+    }
+  } else {
+    try {
+      const snapshot = await withFirebaseTimeout(
+        getDocs(tripsCollection(userId)),
+        "Trip plans are taking too long to load.",
+      );
+      const remote = snapshot.docs.map((item) => ({
+        ...(item.data() as Omit<TripPlan, "id">),
+        id: item.id,
+        userId,
+        updatedAt: item.data().createdAt as string,
+        syncState: "synced" as const,
+      }));
+      await replaceSyncedRows(db, TRIPS_STORE, userId, remote as Array<CachedSavedItem | CachedTripPlan>);
+    } catch (error) {
+      deferCloudSync(error, "[cloud-user-data] Using cached trip plans.");
+    }
   }
 
   return (await userRows<CachedTripPlan>(db, TRIPS_STORE, userId))

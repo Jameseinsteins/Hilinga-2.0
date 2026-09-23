@@ -11,6 +11,13 @@ import {
 } from "firebase/firestore";
 
 import { firestore } from "@/lib/firebase";
+import { isSupabaseConfigured, supabase, withSupabaseTimeout } from "@/lib/supabase";
+import {
+  cacheBusinessPosts,
+  getCachedBusinessPosts,
+  cacheRegisteredBusinesses,
+  getCachedRegisteredBusinesses,
+} from "@/lib/cache-service";
 
 export type BusinessPostCategory = "Photos & Videos" | "Events" | "Promotions";
 
@@ -145,11 +152,436 @@ function toRegisteredBusiness(ownerUid: string, value: StoredBusinessPage): Regi
   };
 }
 
+// ── Supabase row types & converters ──
+
+type BusinessRow = {
+  owner_uid: string;
+  name: string;
+  business_scale: string | null;
+  category: string | null;
+  location: string | null;
+  phone: string | null;
+  email: string | null;
+  hours: string | null;
+  about: string | null;
+  cover_url: string | null;
+  logo_url: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+type BusinessPostRow = {
+  id: string;
+  owner_uid: string;
+  source_id: string | null;
+  business_id: string | null;
+  business_name: string;
+  business_category: string | null;
+  business_location: string | null;
+  business_logo_url: string | null;
+  category: string | null;
+  title: string;
+  detail: string | null;
+  media_url: string | null;
+  media_type: string | null;
+  event_date: string | null;
+  event_location: string | null;
+  promotion_offer: string | null;
+  promotion_ends: string | null;
+  created_at: string | null;
+};
+
+function businessRowToStoredPage(row: BusinessRow): StoredBusinessPage {
+  return {
+    ownerUid: row.owner_uid,
+    name: row.name,
+    businessScale: (row.business_scale as BusinessPageInfo["businessScale"]) ?? "Small business",
+    category: row.category ?? undefined,
+    location: row.location ?? undefined,
+    phone: row.phone ?? undefined,
+    email: row.email ?? undefined,
+    hours: row.hours ?? undefined,
+    about: row.about ?? undefined,
+    coverUrl: row.cover_url ?? undefined,
+    logoUrl: row.logo_url ?? undefined,
+    latitude: row.latitude ?? undefined,
+    longitude: row.longitude ?? undefined,
+    createdAt: row.created_at ?? undefined,
+    updatedAt: row.updated_at ?? undefined,
+  };
+}
+
+function businessRowToPage(row: BusinessRow): BusinessPageInfo {
+  return normalizeBusinessPage(businessRowToStoredPage(row));
+}
+
+function businessRowToRegistered(row: BusinessRow): RegisteredSmallBusiness {
+  return toRegisteredBusiness(row.owner_uid, businessRowToStoredPage(row));
+}
+
+function postRowToBusinessPost(row: BusinessPostRow): BusinessPost {
+  return {
+    id: row.id,
+    ownerUid: row.owner_uid,
+    sourceId: row.source_id ?? undefined,
+    businessId: row.business_id ?? `registered-${row.owner_uid}`,
+    businessName: row.business_name,
+    businessCategory: row.business_category ?? "",
+    businessLocation: row.business_location ?? "",
+    businessLogoUrl: row.business_logo_url ?? "",
+    category: (row.category as BusinessPostCategory) ?? "Photos & Videos",
+    title: row.title,
+    detail: row.detail ?? "",
+    mediaUrl: row.media_url ?? "",
+    mediaType: (row.media_type as "image" | "video") ?? "image",
+    ...(row.event_date ? { eventDate: row.event_date } : {}),
+    ...(row.event_location ? { eventLocation: row.event_location } : {}),
+    ...(row.promotion_offer ? { promotionOffer: row.promotion_offer } : {}),
+    ...(row.promotion_ends ? { promotionEnds: row.promotion_ends } : {}),
+    createdAt: row.created_at ?? new Date().toISOString(),
+  };
+}
+
+// ── Supabase adapters ──
+
+async function supabaseSaveBusinessPage(ownerUid: string, page: BusinessPageInfo): Promise<BusinessPageInfo> {
+  const normalized = normalizeBusinessPage(page);
+  const coords = getAddressCoordinates(normalized.location, ownerUid);
+  const payload = {
+    owner_uid: ownerUid,
+    name: normalized.name,
+    business_scale: normalized.businessScale,
+    category: normalized.category,
+    location: normalized.location,
+    phone: normalized.phone,
+    email: normalized.email,
+    hours: normalized.hours,
+    about: normalized.about,
+    cover_url: normalized.coverUrl,
+    logo_url: normalized.logoUrl,
+    latitude: coords.latitude,
+    longitude: coords.longitude,
+  };
+  const { data, error } = await withSupabaseTimeout(
+    supabase!.from("businesses").upsert(payload as never, { onConflict: "owner_uid" }).select().single(),
+    "Supabase business save timed out.",
+  );
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Business save returned no data.");
+  return businessRowToPage(data as unknown as BusinessRow);
+}
+
+async function supabaseGetBusinessPage(ownerUid: string): Promise<BusinessPageInfo | null> {
+  const { data, error } = await withSupabaseTimeout(
+    supabase!.from("businesses").select("*").eq("owner_uid", ownerUid).maybeSingle(),
+    "Supabase business fetch timed out.",
+  );
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  return businessRowToPage(data as unknown as BusinessRow);
+}
+
+function supabaseSubscribeToOwnedBusinessPage(
+  ownerUid: string,
+  onPage: (page: BusinessPageInfo) => void,
+  onError: (error: Error) => void,
+): () => void {
+  let cancelled = false;
+  let channel: ReturnType<NonNullable<typeof supabase>["channel"]> | null = null;
+
+  async function fetchOne() {
+    const { data, error } = await withSupabaseTimeout(supabase!.from("businesses").select("*").eq("owner_uid", ownerUid).maybeSingle(), "Supabase business fetch timed out.");
+    if (cancelled) return;
+    if (error) { onError(new Error(error.message)); return; }
+    if (!data) return;
+    onPage(businessRowToPage(data as unknown as BusinessRow));
+  }
+
+  void fetchOne();
+
+  try {
+    channel = supabase!
+      .channel(`business:${ownerUid}:${Math.random().toString(36).slice(2, 8)}`)
+      .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "businesses", filter: `owner_uid=eq.${ownerUid}` },
+      () => { void fetchOne(); },
+    )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          void fetchOne();
+        }
+      });
+  } catch {
+    channel = null;
+  }
+
+  return () => {
+    cancelled = true;
+    if (channel) void supabase!.removeChannel(channel);
+  };
+}
+
+async function supabasePublishBusinessPost(input: PublishBusinessPostInput): Promise<BusinessPost> {
+  if (input.mediaType === "video" || input.mediaUrl.startsWith("data:video/")) {
+    throw new Error("Video posts require paid file storage. Use a photo on the free plan.");
+  }
+  if (!input.mediaUrl.startsWith("data:image/") && !/^https:\/\//i.test(input.mediaUrl)) {
+    throw new Error("Choose a valid post photo.");
+  }
+  if (input.mediaUrl.length > 700_000) {
+    throw new Error("That photo is too large for the free cloud database.");
+  }
+  const post: Omit<BusinessPost, "id"> = {
+    ownerUid: input.ownerUid,
+    sourceId: input.sourceId,
+    businessId: `registered-${input.ownerUid}`,
+    businessName: input.businessName.trim(),
+    businessCategory: input.businessCategory.trim(),
+    businessLocation: input.businessLocation.trim(),
+    businessLogoUrl: input.businessLogoUrl,
+    category: input.category,
+    title: input.title.trim(),
+    detail: input.detail.trim(),
+    mediaUrl: input.mediaUrl,
+    mediaType: "image",
+    createdAt: input.createdAt,
+    ...(input.eventDate ? { eventDate: input.eventDate } : {}),
+    ...(input.eventLocation ? { eventLocation: input.eventLocation.trim() } : {}),
+    ...(input.promotionOffer ? { promotionOffer: input.promotionOffer.trim() } : {}),
+    ...(input.promotionEnds ? { promotionEnds: input.promotionEnds } : {}),
+  };
+  const id = cloudPostId(input.ownerUid, input.sourceId);
+  const row = {
+    id,
+    owner_uid: input.ownerUid,
+    source_id: input.sourceId,
+    business_id: post.businessId,
+    business_name: post.businessName,
+    business_category: post.businessCategory,
+    business_location: post.businessLocation,
+    business_logo_url: post.businessLogoUrl,
+    category: post.category,
+    title: post.title,
+    detail: post.detail,
+    media_url: post.mediaUrl,
+    media_type: post.mediaType,
+    event_date: post.eventDate ?? null,
+    event_location: post.eventLocation ?? null,
+    promotion_offer: post.promotionOffer ?? null,
+    promotion_ends: post.promotionEnds ?? null,
+    created_at: post.createdAt,
+  };
+  const { data, error } = await withSupabaseTimeout(
+    supabase!.from("business_posts").upsert(row as never, { onConflict: "id" }).select().single(),
+    "Supabase publish timed out.",
+  );
+  if (error) throw new Error(error.message);
+  const publishedRow = data as unknown as BusinessPostRow;
+  const published: BusinessPost = postRowToBusinessPost(publishedRow);
+  // Keep compatibility with fallback id generation
+  const finalPost: BusinessPost = { ...post, id, businessId: published.businessId || post.businessId };
+  // Update cache immediately
+  const currentPosts = await getCachedBusinessPosts();
+  const updated = [finalPost, ...currentPosts.filter((p) => p.id !== id)];
+  await cacheBusinessPosts(updated);
+  try { window.dispatchEvent(new Event(BUSINESS_CONTENT_CHANGED_EVENT)); } catch { /* non-browser */ }
+  return finalPost;
+}
+
+function supabaseSubscribeToPublishedBusinessPosts(
+  onPosts: (posts: BusinessPost[]) => void,
+  onError: (error: Error) => void,
+): () => void {
+  let cancelled = false;
+  let channel: ReturnType<NonNullable<typeof supabase>["channel"]> | null = null;
+
+  async function fetchAll() {
+    try {
+      const { data, error } = await withSupabaseTimeout(
+        supabase!.from("business_posts").select("*").order("created_at", { ascending: false }).limit(100),
+        "Supabase business posts fetch timed out.",
+      );
+      if (cancelled) return;
+      if (error) {
+        onError(new Error(error.message));
+        return;
+      }
+      const posts = (data as unknown as BusinessPostRow[]).map(postRowToBusinessPost);
+      void cacheBusinessPosts(posts).catch(() => undefined);
+      onPosts(posts);
+      try {
+        window.dispatchEvent(new Event(BUSINESS_CONTENT_CHANGED_EVENT));
+      } catch {
+        /* ignore */
+      }
+    } catch (err) {
+      if (cancelled) return;
+      onError(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  void getCachedBusinessPosts().then((cachedPosts) => {
+    if (cancelled) return;
+    if (cachedPosts.length > 0) {
+      onPosts(cachedPosts);
+    }
+  }).catch(() => undefined);
+
+  void fetchAll();
+
+  try {
+    channel = supabase!
+      .channel(`business-posts:all:${Math.random().toString(36).slice(2, 8)}`)
+      .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "business_posts" },
+      () => { void fetchAll(); },
+    )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") void fetchAll();
+      });
+  } catch {
+    channel = null;
+  }
+
+  return () => {
+    cancelled = true;
+    if (channel) void supabase!.removeChannel(channel);
+  };
+}
+
+function supabaseSubscribeToOwnedBusinessPosts(
+  ownerUid: string,
+  onPosts: (posts: BusinessPost[]) => void,
+  onError: (error: Error) => void,
+): () => void {
+  let cancelled = false;
+  let channel: ReturnType<NonNullable<typeof supabase>["channel"]> | null = null;
+
+  async function fetchOwned() {
+    try {
+      const { data, error } = await withSupabaseTimeout(
+        supabase!.from("business_posts").select("*").eq("owner_uid", ownerUid).order("created_at", { ascending: false }),
+        "Supabase owned business posts fetch timed out.",
+      );
+      if (cancelled) return;
+      if (error) {
+        onError(new Error(error.message));
+        return;
+      }
+      const posts = (data as unknown as BusinessPostRow[]).map(postRowToBusinessPost);
+      onPosts(posts);
+    } catch (err) {
+      if (cancelled) return;
+      onError(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  void fetchOwned();
+
+  try {
+    channel = supabase!
+      .channel(`business-posts:${ownerUid}:${Math.random().toString(36).slice(2, 8)}`)
+      .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "business_posts", filter: `owner_uid=eq.${ownerUid}` },
+      () => { void fetchOwned(); },
+    )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") void fetchOwned();
+      });
+  } catch {
+    channel = null;
+  }
+
+  return () => {
+    cancelled = true;
+    if (channel) void supabase!.removeChannel(channel);
+  };
+}
+
+function supabaseSubscribeToRegisteredBusinesses(
+  onBusinesses: (businesses: RegisteredSmallBusiness[]) => void,
+  onError: (error: Error) => void,
+): () => void {
+  let cancelled = false;
+  let channel: ReturnType<NonNullable<typeof supabase>["channel"]> | null = null;
+
+  async function fetchAll() {
+    try {
+      const { data, error } = await withSupabaseTimeout(
+        supabase!.from("businesses").select("*").order("name", { ascending: true }),
+        "Supabase registered businesses fetch timed out.",
+      );
+      if (cancelled) return;
+      if (error) {
+        onError(new Error(error.message));
+        return;
+      }
+      const rows = (data as unknown as BusinessRow[]).map(businessRowToRegistered).sort((a, b) => a.name.localeCompare(b.name));
+      void cacheRegisteredBusinesses(rows).catch(() => undefined);
+      onBusinesses(rows);
+      try {
+        window.dispatchEvent(new Event(BUSINESS_CONTENT_CHANGED_EVENT));
+      } catch {
+        /* ignore */
+      }
+    } catch (err) {
+      if (cancelled) return;
+      onError(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  void getCachedRegisteredBusinesses().then((cachedBusinesses) => {
+    if (cancelled) return;
+    if (cachedBusinesses.length > 0) {
+      onBusinesses(cachedBusinesses);
+    }
+  }).catch(() => undefined);
+
+  void fetchAll();
+
+  try {
+    channel = supabase!
+      .channel(`businesses:all:${Math.random().toString(36).slice(2, 8)}`)
+      .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "businesses" },
+      () => { void fetchAll(); },
+    )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") void fetchAll();
+      });
+  } catch {
+    channel = null;
+  }
+
+  return () => {
+    cancelled = true;
+    if (channel) void supabase!.removeChannel(channel);
+  };
+}
+
+// ── Public API (Supabase-first, Firestore fallback) ──
+
 export async function saveBusinessPage(ownerUid: string, page: BusinessPageInfo) {
   const normalized = normalizeBusinessPage(page);
   if (normalized.coverUrl.length > 450_000 || normalized.logoUrl.length > 220_000) {
     throw new Error("The business photos are too large for the free cloud database.");
   }
+
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const saved = await supabaseSaveBusinessPage(ownerUid, normalized);
+      return saved;
+    } catch (error) {
+      console.warn("[business-content] Supabase saveBusinessPage fallback:", error);
+    }
+  }
+
   const pageRef = doc(firestore, "businesses", ownerUid);
   const existing = await getDoc(pageRef);
   const savedAt = new Date().toISOString();
@@ -167,6 +599,16 @@ export async function saveBusinessPage(ownerUid: string, page: BusinessPageInfo)
 }
 
 export async function ensureBusinessPage(ownerUid: string, fallback: BusinessPageInfo) {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const existing = await supabaseGetBusinessPage(ownerUid);
+      if (existing) return existing;
+      return await supabaseSaveBusinessPage(ownerUid, fallback);
+    } catch (error) {
+      console.warn("[business-content] Supabase ensureBusinessPage fallback:", error);
+    }
+  }
+
   const snapshot = await getDoc(doc(firestore, "businesses", ownerUid));
   if (snapshot.exists()) {
     return normalizeBusinessPage(snapshot.data() as StoredBusinessPage);
@@ -175,6 +617,29 @@ export async function ensureBusinessPage(ownerUid: string, fallback: BusinessPag
 }
 
 export async function hasBusinessPage(ownerUid: string) {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await withSupabaseTimeout(
+        supabase.from("businesses").select("owner_uid").eq("owner_uid", ownerUid).maybeSingle(),
+        "Supabase hasBusinessPage timed out.",
+      );
+      if (error) throw new Error(error.message);
+      if (data) return true;
+      // Also check Firestore for coexistence (older business created before migration)
+      const snap = await getDoc(doc(firestore, "businesses", ownerUid));
+      if (snap.exists()) {
+        // Opportunistic backfill
+        try {
+          const page = normalizeBusinessPage(snap.data() as StoredBusinessPage);
+          await supabaseSaveBusinessPage(ownerUid, page).catch(() => undefined);
+        } catch { /* ignore */ }
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.warn("[business-content] hasBusinessPage Supabase fallback:", error);
+    }
+  }
   return (await getDoc(doc(firestore, "businesses", ownerUid))).exists();
 }
 
@@ -183,6 +648,9 @@ export function subscribeToOwnedBusinessPage(
   onPage: (page: BusinessPageInfo) => void,
   onError: (error: Error) => void,
 ) {
+  if (isSupabaseConfigured && supabase) {
+    return supabaseSubscribeToOwnedBusinessPage(ownerUid, onPage, onError);
+  }
   return onSnapshot(doc(firestore, "businesses", ownerUid), (snapshot) => {
     if (!snapshot.exists()) return;
     onPage(normalizeBusinessPage(snapshot.data() as StoredBusinessPage));
@@ -194,6 +662,16 @@ function toBusinessPost(id: string, value: Omit<BusinessPost, "id">): BusinessPo
 }
 
 export async function publishBusinessPost(input: PublishBusinessPostInput) {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      return await supabasePublishBusinessPost(input);
+    } catch (error) {
+      console.warn("[business-content] Supabase publishBusinessPost fallback:", error);
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes("Video posts") || msg.includes("too large") || msg.includes("valid post photo")) throw error as Error;
+    }
+  }
+
   const id = cloudPostId(input.ownerUid, input.sourceId);
   if (input.mediaType === "video" || input.mediaUrl.startsWith("data:video/")) {
     throw new Error("Video posts require paid file storage. Use a photo on the free plan.");
@@ -224,21 +702,45 @@ export async function publishBusinessPost(input: PublishBusinessPostInput) {
     ...(input.promotionEnds ? { promotionEnds: input.promotionEnds } : {}),
   };
   await setDoc(doc(firestore, "businessPosts", id), post);
-  return toBusinessPost(id, post);
+  const published = toBusinessPost(id, post);
+
+  // Update cache immediately so it's available to other devices/tabs
+  const currentPosts = await getCachedBusinessPosts();
+  const updated = [published, ...currentPosts.filter((p) => p.id !== id)];
+  await cacheBusinessPosts(updated);
+
+  // Dispatch event to notify other tabs of the change
+  try { window.dispatchEvent(new Event(BUSINESS_CONTENT_CHANGED_EVENT)); } catch { /* non-browser */ }
+
+  return published;
 }
 
 export function subscribeToPublishedBusinessPosts(
   onPosts: (posts: BusinessPost[]) => void,
   onError: (error: Error) => void,
 ) {
+  if (isSupabaseConfigured && supabase) {
+    return supabaseSubscribeToPublishedBusinessPosts(onPosts, onError);
+  }
+  // Load from cache first for instant availability
+  void getCachedBusinessPosts().then((cachedPosts) => {
+    if (cachedPosts.length > 0) {
+      publishedBusinessPostCache = cachedPosts;
+      onPosts(cachedPosts);
+    }
+  }).catch(() => undefined);
+
+  // Subscribe to Firestore for real-time updates
   const postsQuery = query(businessPostsCollection, orderBy("createdAt", "desc"), limit(100));
   return onSnapshot(postsQuery, (snapshot) => {
     publishedBusinessPostCache = snapshot.docs.map((snapshotDoc) => toBusinessPost(
       snapshotDoc.id,
       snapshotDoc.data() as Omit<BusinessPost, "id">,
     ));
+    // Cache to IndexedDB so it persists across page refreshes
+    void cacheBusinessPosts(publishedBusinessPostCache).catch(() => undefined);
     onPosts(publishedBusinessPostCache);
-    window.dispatchEvent(new Event(BUSINESS_CONTENT_CHANGED_EVENT));
+    try { window.dispatchEvent(new Event(BUSINESS_CONTENT_CHANGED_EVENT)); } catch { /* ignore */ }
   }, onError);
 }
 
@@ -247,6 +749,9 @@ export function subscribeToOwnedBusinessPosts(
   onPosts: (posts: BusinessPost[]) => void,
   onError: (error: Error) => void,
 ) {
+  if (isSupabaseConfigured && supabase) {
+    return supabaseSubscribeToOwnedBusinessPosts(ownerUid, onPosts, onError);
+  }
   const postsQuery = query(businessPostsCollection, where("ownerUid", "==", ownerUid));
   return onSnapshot(postsQuery, (snapshot) => {
     onPosts(snapshot.docs.map((snapshotDoc) => toBusinessPost(
@@ -289,12 +794,26 @@ export function subscribeToRegisteredBusinesses(
   onBusinesses: (businesses: RegisteredSmallBusiness[]) => void,
   onError: (error: Error) => void,
 ) {
+  if (isSupabaseConfigured && supabase) {
+    return supabaseSubscribeToRegisteredBusinesses(onBusinesses, onError);
+  }
+  // Load from cache first for instant availability
+  void getCachedRegisteredBusinesses().then((cachedBusinesses) => {
+    if (cachedBusinesses.length > 0) {
+      registeredBusinessCache = cachedBusinesses;
+      onBusinesses(cachedBusinesses);
+    }
+  }).catch(() => undefined);
+
+  // Subscribe to Firestore for real-time updates
   return onSnapshot(businessesCollection, (snapshot) => {
     registeredBusinessCache = snapshot.docs
       .map((snapshotDoc) => toRegisteredBusiness(snapshotDoc.id, snapshotDoc.data() as StoredBusinessPage))
       .sort((a, b) => a.name.localeCompare(b.name));
+    // Cache to IndexedDB so it persists across page refreshes
+    void cacheRegisteredBusinesses(registeredBusinessCache).catch(() => undefined);
     onBusinesses(registeredBusinessCache);
-    window.dispatchEvent(new Event(BUSINESS_CONTENT_CHANGED_EVENT));
+    try { window.dispatchEvent(new Event(BUSINESS_CONTENT_CHANGED_EVENT)); } catch { /* ignore */ }
   }, onError);
 }
 

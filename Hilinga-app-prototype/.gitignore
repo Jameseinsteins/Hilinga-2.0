@@ -25,3 +25,6 @@ yarn-error.*
 .vercel
 .env*
 !.env.example
+serviceAccountKey.json
+*-key.json
+*firebase-adminsdk*.json

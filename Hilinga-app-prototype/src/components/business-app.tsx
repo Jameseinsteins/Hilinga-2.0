@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { useAuth } from "@/providers/auth-provider";
 import { BusinessVisitors } from "@/components/business-visitors";
+import { BusinessAnalytics } from "@/components/business-analytics";
 import {
   BUSINESS_CONTENT_CHANGED_EVENT,
   ensureBusinessPage,
@@ -20,15 +21,16 @@ import {
   type BusinessInquiry,
 } from "@/lib/business-engagement";
 
-type BusinessTab = "home" | "my-business" | "visitors" | "create" | "inbox" | "profile";
+type BusinessTab = "home" | "my-business" | "visitors" | "analytics" | "create" | "inbox" | "profile";
 type BusinessItem = StoredBusinessItem;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 const tabs: { id: BusinessTab; label: string; icon: string }[] = [
   { id: "home", label: "HOME", icon: "home" },
   { id: "my-business", label: "MY BIZ", icon: "storefront" },
-  { id: "create", label: "Create", icon: "add" },
   { id: "visitors", label: "VISITORS", icon: "qr_code_scanner" },
+  { id: "create", label: "Create", icon: "add" },
+  { id: "analytics", label: "ANALYTICS", icon: "analytics" },
   { id: "inbox", label: "INBOX", icon: "inbox" },
   { id: "profile", label: "PROFILE", icon: "person" },
 ];
@@ -316,7 +318,7 @@ export function BusinessApp() {
 
   async function changeInquiryStatus(inquiry: BusinessInquiry, status: "read" | "unread") {
     setInquiryError("");
-    try { await setBusinessInquiryStatus(inquiry.id, status); }
+    try { await setBusinessInquiryStatus(inquiry.id, status, inquiry.businessId); }
     catch {
       setInquiryError("That message could not be updated. Please try again.");
       throw new Error("Inquiry status update failed");
@@ -372,6 +374,8 @@ export function BusinessApp() {
         </div>}
 
         {tab === "visitors" && <BusinessVisitors businessName={businessName} businessLocation={pageInfo.location} initialQrValue={initialProfileQr} />}
+
+        {tab === "analytics" && <BusinessAnalytics businessName={businessName} businessId={user?.uid || ""} />}
 
         {tab === "inbox" && <BusinessInbox inquiries={inquiries} error={inquiryError} onStatusChange={changeInquiryStatus} />}
 

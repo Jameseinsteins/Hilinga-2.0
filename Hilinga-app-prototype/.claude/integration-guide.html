@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hilinga Triple Feature Integration</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+    :root {
+      --c-primary: #007AFF;
+      --c-success: #10b981;
+      --c-warning: #f59e0b;
+      --c-error: #ef4444;
+      --c-text-primary: #1a1a1a;
+      --c-text-secondary: #666666;
+      --c-text-tertiary: #999999;
+      --c-bg-primary: #ffffff;
+      --c-bg-secondary: #f5f5f5;
+      --c-border: #e5e5e5;
+      --c-accent: #06b6d4;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --c-primary: #4da8ff;
+        --c-success: #34d399;
+        --c-warning: #fbbf24;
+        --c-error: #f87171;
+        --c-text-primary: #f5f5f5;
+        --c-text-secondary: #b3b3b3;
+        --c-text-tertiary: #808080;
+        --c-bg-primary: #1a1a1a;
+        --c-bg-secondary: #2a2a2a;
+        --c-border: #404040;
+        --c-accent: #22d3ee;
+      }
+    }
+
+    :root[data-theme="dark"] {
+      --c-primary: #4da8ff;
+      --c-success: #34d399;
+      --c-warning: #fbbf24;
+      --c-error: #f87171;
+      --c-text-primary: #f5f5f5;
+      --c-text-secondary: #b3b3b3;
+      --c-text-tertiary: #808080;
+      --c-bg-primary: #1a1a1a;
+      --c-bg-secondary: #2a2a2a;
+      --c-border: #404040;
+      --c-accent: #22d3ee;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      color: var(--c-text-primary);
+      background: var(--c-bg-primary);
+      line-height: 1.6;
+      font-size: 16px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 40px 24px;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, var(--c-primary) 0%, var(--c-accent) 100%);
+      color: white;
+      padding: 60px 40px;
+      border-radius: 16px;
+      margin-bottom: 60px;
+      text-align: center;
+    }
+
+    .hero h1 {
+      font-size: 36px;
+      font-weight: 800;
+      margin-bottom: 12px;
+      text-wrap: balance;
+    }
+
+    .hero p {
+      font-size: 18px;
+      opacity: 0.95;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 24px;
+      margin-bottom: 60px;
+    }
+
+    .feature-card {
+      background: var(--c-bg-secondary);
+      border: 1px solid var(--c-border);
+      border-radius: 12px;
+      padding: 32px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--c-primary);
+      box-shadow: 0 8px 24px rgba(0, 122, 255, 0.1);
+    }
+
+    .feature-card h2 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: var(--c-primary);
+    }
+
+    .feature-card p {
+      color: var(--c-text-secondary);
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+
+    .feature-icon {
+      font-size: 32px;
+      margin-bottom: 16px;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--c-border);
+      margin-bottom: 32px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .tab-button {
+      padding: 12px 20px;
+      background: none;
+      border: none;
+      border-bottom: 3px solid transparent;
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--c-text-secondary);
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+
+    .tab-button.active {
+      color: var(--c-primary);
+      border-bottom-color: var(--c-primary);
+    }
+
+    .tab-button:hover {
+      color: var(--c-text-primary);
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+      to {
+        opacity: 1;
+      }
+    }
+
+    .section {
+      margin-bottom: 48px;
+    }
+
+    .section h3 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 20px;
+      color: var(--c-text-primary);
+    }
+
+    .code-block {
+      background: var(--c-bg-secondary);
+      border: 1px solid var(--c-border);
+      border-radius: 8px;
+      padding: 16px;
+      overflow-x: auto;
+      margin-bottom: 16px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--c-text-secondary);
+    }
+
+    .dataflow {
+      background: var(--c-bg-secondary);
+      border: 2px solid var(--c-border);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .dataflow-item {
+      padding: 12px;
+      margin-bottom: 8px;
+      background: var(--c-bg-primary);
+      border-left: 4px solid var(--c-primary);
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    .dataflow-item.success {
+      border-left-color: var(--c-success);
+    }
+
+    .dataflow-item.warning {
+      border-left-color: var(--c-warning);
+    }
+
+    .dataflow-item.error {
+      border-left-color: var(--c-error);
+    }
+
+    .checklist {
+      list-style: none;
+    }
+
+    .checklist li {
+      padding: 10px 0;
+      padding-left: 28px;
+      position: relative;
+      font-size: 14px;
+      color: var(--c-text-secondary);
+    }
+
+    .checklist li:before {
+      content: "▢";
+      position: absolute;
+      left: 0;
+      color: var(--c-text-tertiary);
+    }
+
+    .checklist li.completed:before {
+      content: "✓";
+      color: var(--c-success);
+      font-weight: 700;
+    }
+
+    .integration-matrix {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .matrix-item {
+      background: var(--c-bg-secondary);
+      border: 1px solid var(--c-border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .matrix-label {
+      font-weight: 600;
+      color: var(--c-text-primary);
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .matrix-value {
+      color: var(--c-text-secondary);
+      font-size: 13px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .warning-box {
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid var(--c-warning);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      color: var(--c-text-primary);
+      font-size: 14px;
+    }
+
+    .success-box {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid var(--c-success);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      color: var(--c-text-primary);
+      font-size: 14px;
+    }
+
+    .timeline {
+      position: relative;
+      padding-left: 32px;
+      margin-bottom: 24px;
+    }
+
+    .timeline-item {
+      padding-bottom: 24px;
+      position: relative;
+    }
+
+    .timeline-item:last-child {
+      padding-bottom: 0;
+    }
+
+    .timeline-item:before {
+      content: "";
+      position: absolute;
+      left: -28px;
+      top: 0;
+      width: 12px;
+      height: 12px;
+      background: var(--c-primary);
+      border-radius: 50%;
+      border: 3px solid var(--c-bg-primary);
+    }
+
+    .timeline-item.done:before {
+      background: var(--c-success);
+    }
+
+    .timeline-item:after {
+      content: "";
+      position: absolute;
+      left: -22px;
+      top: 12px;
+      width: 2px;
+      height: calc(100% - 12px);
+      background: var(--c-border);
+    }
+
+    .timeline-item:last-child:after {
+      display: none;
+    }
+
+    .timeline-label {
+      font-weight: 600;
+      color: var(--c-text-primary);
+      margin-bottom: 4px;
+    }
+
+    .timeline-desc {
+      color: var(--c-text-secondary);
+      font-size: 14px;
+    }
+
+    footer {
+      border-top: 1px solid var(--c-border);
+      padding-top: 32px;
+      margin-top: 60px;
+      text-align: center;
+      color: var(--c-text-secondary);
+      font-size: 14px;
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        padding: 24px 16px;
+      }
+
+      .hero {
+        padding: 40px 24px;
+      }
+
+      .hero h1 {
+        font-size: 24px;
+      }
+
+      .hero p {
+        font-size: 16px;
+      }
+
+      .tabs {
+        gap: 4px;
+      }
+
+      .tab-button {
+        padding: 10px 16px;
+        font-size: 14px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="hero">
+      <h1>Hilinga Triple Feature Integration</h1>
+      <p>Payment Processing, Itinerary Editing & Arrival Detection</p>
+    </div>
+
+    <div class="features-grid">
+      <div class="feature-card" onclick="switchTab('payment')">
+        <div class="feature-icon">💳</div>
+        <h2>Payment Integration</h2>
+        <p>Process payments before trip starts with multiple payment methods support.</p>
+      </div>
+      <div class="feature-card" onclick="switchTab('itinerary')">
+        <div class="feature-icon">✏️</div>
+        <h2>Stop Insertion</h2>
+        <p>Edit itineraries dynamically by inserting stops before or after existing ones.</p>
+      </div>
+      <div class="feature-card" onclick="switchTab('arrival')">
+        <div class="feature-icon">📍</div>
+        <h2>Arrival Detection</h2>
+        <p>Automatic geofence detection with auto-advance and manual override.</p>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-button active" onclick="switchTab('overview')">Overview</button>
+      <button class="tab-button" onclick="switchTab('payment')">Payment</button>
+      <button class="tab-button" onclick="switchTab('itinerary')">Itinerary</button>
+      <button class="tab-button" onclick="switchTab('arrival')">Arrival</button>
+      <button class="tab-button" onclick="switchTab('dataflow')">Data Flow</button>
+      <button class="tab-button" onclick="switchTab('testing')">Testing</button>
+    </div>
+
+    <!-- Overview Tab -->
+    <div id="overview" class="tab-content active">
+      <div class="section">
+        <h3>Integration Overview</h3>
+        <p>Three new features enhance the MapScreen component with payment processing, flexible itinerary management, and intelligent arrival detection.</p>
+      </div>
+
+      <div class="section">
+        <h3>Architecture</h3>
+        <div class="dataflow">
+          <div class="dataflow-item"><strong>MapScreen Component</strong> - Main orchestrator</div>
+          <div class="dataflow-item success"><strong>useMapState</strong> (existing) - Core state management</div>
+          <div class="dataflow-item success"><strong>usePaymentState</strong> (new) - Payment handling</div>
+          <div class="dataflow-item success"><strong>useItineraryEditor</strong> (new) - Stop insertion</div>
+          <div class="dataflow-item success"><strong>useArrivalDetection</strong> (new) - Geofencing</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>Key Dependencies</h3>
+        <ul class="checklist">
+          <li>Firebase for trip plan persistence</li>
+          <li>Browser Geolocation API for location tracking</li>
+          <li>Payment provider API (Stripe/PayMongo/GCash)</li>
+          <li>OpenStreetMap for routing display</li>
+        </ul>
+      </div>
+
+      <div class="warning-box">
+        <strong>Note:</strong> Test trips skip payment processing. Non-test trips require payment completion before navigation can begin.
+      </div>
+    </div>
+
+    <!-- Payment Tab -->
+    <div id="payment" class="tab-content">
+      <div class="section">
+        <h3>Payment State Hook</h3>
+        <p>Manage payment processing, methods, and status tracking with automatic retry and error handling.</p>
+
+        <div class="code-block">export interface PaymentInfo {
+  tripId: string
+  amount: number
+  currency: string
+  method: PaymentMethod
+  status: PaymentStatus
+  transactionId?: string
+  errorMessage?: string
+  createdAt: number
+  completedAt?: number
+}</div>
+
+        <div class="integration-matrix">
+          <div class="matrix-item">
+            <div class="matrix-label">Status Flow</div>
+            <div class="matrix-value">pending → processing → completed|failed</div>
+          </div>
+          <div class="matrix-item">
+            <div class="matrix-label">Payment Methods</div>
+            <div class="matrix-value">card, digital_wallet, cash_on_arrival</div>
+          </div>
+          <div class="matrix-item">
+            <div class="matrix-label">Retry Logic</div>
+            <div class="matrix-value">Exponential backoff, max 3 attempts</div>
+          </div>
+          <div class="matrix-item">
+            <div class="matrix-label">Persistence</div>
+            <div class="matrix-value">Firebase + localStorage fallback</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>MapScreen Integration</h3>
+        <div class="code-block">// Initialize payment when trip starts
+useEffect(() => {
+  if (selectedPlan && !selectedPlan.isTestTrip) {
+    const estimatedCost = calculateTripCost(selectedPlan)
+    paymentActions.initializePayment(selectedPlan.id, estimatedCost)
+  }
+}, [selectedPlan])</div>
+
+        <div class="code-block">// Disable navigation until payment complete
+<button
+  onClick={handleStartNavigation}
+  disabled={
+    visibleRouteStops.length === 0 ||
+    (paymentState.paymentInfo?.status !== 'completed')
+  }
+>
+  Start Navigation
+</button></div>
+      </div>
+
+      <div class="section">
+        <h3>UI Components</h3>
+        <ul class="checklist">
+          <li>Payment status header (shows cost + payment button)</li>
+          <li>Payment modal (method selection + processing)</li>
+          <li>Completion badge (checkmark confirmation)</li>
+          <li>Error display (with retry button)</li>
+        </ul>
+      </div>
+
+      <div class="success-box">
+        <strong>Best Practice:</strong> Show payment status prominently in trip header. Use green checkmark for completed, amber warning for pending, red X for failed.
+      </div>
+    </div>
+
+    <!-- Itinerary Tab -->
+    <div id="itinerary" class="tab-content">
+      <div class="section">
+        <h3>Itinerary Editor Hook</h3>
+        <p>Manage stop insertion state, preview changes, and commit updates to Firebase.</p>
+
+        <div class="code-block">export interface ItineraryEditState {
+  isEditing: boolean
+  editingDay: number | null
+  insertMode: 'before' | 'after'
+  targetStopIndex: number | null
+  newStopTitle: string
+  newStopNotes: string
+  previewStops: MapRouteStop[] | null
+}</div>
+
+        <div class="integration-matrix">
+          <div class="matrix-item">
+            <div class="matrix-label">Insert Modes</div>
+            <div class="matrix-value">before/after existing stops</div>
+          </div>
+          <div class="matrix-item">
+            <div class="matrix-label">Validation</div>
+            <div class="matrix-value">Non-empty title required</div>
+          </div>
+          <div class="matrix-item">
+            <div class="matrix-label">Preview</div>
+            <div class="matrix-value">Live route update before commit</div>
+          </div>
+          <div class="matrix-item">
+            <div class="matrix-label">Conflict Handling</div>
+            <div class="matrix-value">Version check before update</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>MapScreen Integration</h3>
+        <div class="code-block">// Add Edit Itinerary button
+<button
+  className="btn btn-secondary"
+  onClick={() => setShowEditItinerary(true)}
+>
+  <Icon name="edit_itinerary" size={18} />
+  Edit Itinerary
+</button></div>
+
+        <div class="code-block">// Insert stop logic
+function buildUpdatedItinerary(
+  currentItinerary: ItineraryDay[],
+  day: number,
+  stopIndex: number,
+  newStopTitle: string,
+  insertMode: 'before' | 'after'
+): ItineraryDay[] {
+  return currentItinerary.map(dayPlan => {
+    if (dayPlan.day !== day) return dayPlan
+
+    const newStops = [...dayPlan.stops]
+    const insertIndex = insertMode === 'before' ? stopIndex : stopIndex + 1
+
+    newStops.splice(insertIndex, 0, {
+      id: `stop-${Date.now()}`,
+      title: newStopTitle,
+      notes: '',
+    })
+
+    return { ...dayPlan, stops: newStops }
+  })
+}</div>
+      </div>
+
+      <div class="section">
+        <h3>UI Components</h3>
+        <ul class="checklist">
+          <li>Edit Itinerary button (in control panel)</li>
+          <li>Insert modal (before/after selection)</li>
+          <li>Live preview (updated route display)</li>
+          <li>Save/Cancel buttons</li>
+          <li>Undo support (previous state restoration)</li>
+        </ul>
+      </div>
+
+      <div class="warning-box">
+        <strong>Important:</strong> Check for concurrent edits by comparing itinerary version before update. Prevent conflicts gracefully.
+      </div>
+    </div>
+
+    <!-- Arrival Tab -->
+    <div id="arrival" class="tab-content">
+      <div class="section">
+        <h3>Arrival Detection Hook</h3>
+        <p>Monitor location against geofence and trigger auto-advance when user arrives at destination.</p>
+
+        <div class="code-block">export interface ArrivalDetectionConfig {
+  geofenceRadiusMeters: number        // default: 100m
+  checkIntervalMs: number             // default: 5000ms
+  minAccuracyMeters: number           // default: 50m
+}</div>
+
+        <div class="integration-matrix">
+          <div class="matrix-item">
+            <div class="matrix-label">Geofence Radius</div>
+            <div class="matrix-value">100m (configurable)</div>
+          </div>
+          <div class="matrix-item">
+            <div class="matrix-label">Check Interval</div>
+            <div class="matrix-value">5s (configurable)</div>
+          </div>
+          <div class="matrix-item">
+            <div class="matrix-label">Auto-Advance</div>
+            <div class="matrix-value">5 second countdown</div>
+          </div>
+          <div class="matrix-item">
+            <div class="matrix-label">Accuracy Threshold</div>
+            <div class="matrix-value">50m GPS accuracy</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>MapScreen Integration</h3>
+        <div class="code-block">// Start tracking when navigation begins
+const arrival = useArrivalDetection(
+  (location) => handleAdvanceNavStop(),
+  { geofenceRadiusMeters: 100 }
+)
+
+useEffect(() => {
+  if (state.isNavigating && visibleRouteStops[state.currentNavStopIndex]) {
+    const currentStop = visibleRouteStops[state.currentNavStopIndex]
+    arrival.startTracking({
+      latitude: currentStop.place.latitude,
+      longitude: currentStop.place.longitude,
+    })
+  } else {
+    arrival.stopTracking()
+  }
+}, [state.isNavigating, state.currentNavStopIndex])</div>
+
+        <div class="code-block">// Show arrival notification
+{arrival.arrivedAt && (
+  <div className="arrival-notification">
+    <strong>You've arrived!</strong>
+    <span>Auto-advancing in {arrival.arrivalCountdown}s</span>
+    <button onClick={arrival.markAsArrived}>Continue Now</button>
+    <button onClick={arrival.stopTracking}>Cancel</button>
+  </div>
+)}</div>
+      </div>
+
+      <div class="section">
+        <h3>UI Components</h3>
+        <ul class="checklist">
+          <li>Geofence detection (background monitoring)</li>
+          <li>Arrival notification (with countdown)</li>
+          <li>Auto-advance button</li>
+          <li>Manual override (Cancel/Continue)</li>
+          <li>Low accuracy warning</li>
+        </ul>
+      </div>
+
+      <div class="warning-box">
+        <strong>Battery Impact:</strong> Arrival detection uses high-accuracy GPS. Consider warning users about battery drain and providing manual override.
+      </div>
+    </div>
+
+    <!-- Data Flow Tab -->
+    <div id="dataflow" class="tab-content">
+      <div class="section">
+        <h3>Data Flow Architecture</h3>
+
+        <svg viewBox="0 0 800 600" style="width: 100%; max-width: 800px; border: 1px solid var(--c-border); border-radius: 8px; margin-bottom: 24px;" preserveAspectRatio="xMidYMid meet">
+          <!-- Payment Flow -->
+          <g>
+            <rect x="20" y="20" width="160" height="60" rx="8" fill="var(--c-bg-secondary)" stroke="var(--c-primary)" stroke-width="2"/>
+            <text x="100" y="55" text-anchor="middle" font-size="14" font-weight="600" fill="var(--c-text-primary)">Payment Module</text>
+
+            <rect x="220" y="20" width="160" height="60" rx="8" fill="var(--c-bg-secondary)" stroke="var(--c-primary)" stroke-width="2"/>
+            <text x="300" y="45" text-anchor="middle" font-size="12" fill="var(--c-text-secondary)">Process Payment</text>
+            <text x="300" y="65" text-anchor="middle" font-size="12" fill="var(--c-text-secondary)">API Call</text>
+
+            <path d="M 180 50 L 220 50" stroke="var(--c-primary)" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+            <rect x="420" y="20" width="160" height="60" rx="8" fill="var(--c-bg-secondary)" stroke="var(--c-success)" stroke-width="2"/>
+            <text x="500" y="45" text-anchor="middle" font-size="12" fill="var(--c-text-secondary)">Firebase</text>
+            <text x="500" y="65" text-anchor="middle" font-size="12" fill="var(--c-text-secondary)">Transaction ID</text>
+
+            <path d="M 380 50 L 420 50" stroke="var(--c-success)" stroke-width="2" marker-end="url(#arrowhead-success)"/>
+          </g>
+
+          <!-- Itinerary Flow -->
+          <g>
+            <rect x="20" y="150" width="160" height="60" rx="8" fill="var(--c-bg-secondary)" stroke="var(--c-accent)" stroke-width="2"/>
+            <text x="100" y="175" text-anchor="middle" font-size="14" font-weight="600" fill="var(--c-text-primary)">Itinerary Editor</text>
+            <text x="100" y="195" text-anchor="middle" font-size="12" fill="var(--c-text-secondary)">Stop Insertion</text>
+
+            <rect x="220" y="150" width="160" height="60" rx="8" fill="var(--c-bg-secondary)" stroke="var(--c-accent)" stroke-width="2"/>
+            <text x="300" y="175" text-anchor="middle" font-size="12" fill="var(--c-text-secondary)">Version Check</text>
+            <text x="300" y="195" text-anchor="middle" font-size="12" fill="var(--c-text-secondary)">& Preview</text>
+
+            <path d="M 180 180 L 220 180" stroke="var(--c-accent)" stroke-width="2" marker-end="url(#arrowhead-accent)"/>
+
+            <rect x="420" y="150" width="160" height="60" rx="8" fill="var(--c-bg-secondary)" stroke="var(--c-success)" stroke-width="2"/>
+            <text x="500" y="175" text-anchor="middle" font-size="12" fill="var(--c-text-secondary)">Firebase</text>
+            <text x="500" y="195" text-anchor="middle" font-size="12" fill="var(--c-text-secondary)">Updated Itinerary</text>
+
+            <path d="M 380 180 L 420 180" stroke="var(--c-success)" stroke-width="2" marker-end="url(#arrowhead-success)"/>
+          </g>
+
+          <!-- Arrival Flow -->
+          <g>
+            <rect x="20" y="280" width="160" height="60" rx="8" fill="var(--c-bg-secondary)" stroke="var(--c-warning)" stroke-width="2"/>
+            <text x="100" y="305" text-anchor="middle" font-size="14" font-weight="600" fill="var(--c-text-primary)">Arrival Detector</text>
+            <text x="100" y="325" text-anchor="middle" font-size="12" fill="var(--c-text-secondary)">Geofencing</text>
+
+            <rect x="220" y="280" width="160" height="60" rx="8" fill="var(--c-bg-secondary)" stroke="var(--c-warning)" stroke-width="2"/>
+            <text x="300" y="305" text-anchor="middle" font-size="12" fill="var(--c-text-secondary)">Distance Check</text>
+            <text x="300" y="325" text-anchor="middle" font-size="12" fill="var(--c-text-secondary)">& Accuracy</text>
+
+            <path d="M 180 310 L 220 310" stroke="var(--c-warning)" stroke-width="2" marker-end="url(#arrowhead-warning)"/>
+
+            <rect x="420" y="280" width="160" height="60" rx="8" fill="var(--c-bg-secondary)" stroke="var(--c-success)" stroke-width="2"/>
+            <text x="500" y="305" text-anchor="middle" font-size="12" fill="var(--c-text-secondary)">MapScreen State</text>
+            <text x="500" y="325" text-anchor="middle" font-size="12" fill="var(--c-text-secondary)">Auto-Advance</text>
+
+            <path d="M 380 310 L 420 310" stroke="var(--c-success)" stroke-width="2" marker-end="url(#arrowhead-success)"/>
+          </g>
+
+          <!-- Legend -->
+          <g>
+            <text x="20" y="430" font-size="12" fill="var(--c-text-secondary)" font-weight="600">Data Flow:</text>
+            <line x1="20" y1="450" x2="60" y2="450" stroke="var(--c-primary)" stroke-width="2" marker-end="url(#arrowhead)"/>
+            <text x="70" y="455" font-size="11" fill="var(--c-text-secondary)">Input/Processing</text>
+
+            <line x1="20" y1="480" x2="60" y2="480" stroke="var(--c-success)" stroke-width="2" marker-end="url(#arrowhead-success)"/>
+            <text x="70" y="485" font-size="11" fill="var(--c-text-secondary)">Data Persist</text>
+
+            <line x1="300" y1="450" x2="340" y2="450" stroke="var(--c-accent)" stroke-width="2" marker-end="url(#arrowhead-accent)"/>
+            <text x="350" y="455" font-size="11" fill="var(--c-text-secondary)">Local State</text>
+
+            <line x1="300" y1="480" x2="340" y2="480" stroke="var(--c-warning)" stroke-width="2" marker-end="url(#arrowhead-warning)"/>
+            <text x="350" y="485" font-size="11" fill="var(--c-text-secondary)">Background Monitoring</text>
+          </g>
+
+          <!-- Arrow markers -->
+          <defs>
+            <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+              <polygon points="0 0, 10 3, 0 6" fill="var(--c-primary)"/>
+            </marker>
+            <marker id="arrowhead-success" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+              <polygon points="0 0, 10 3, 0 6" fill="var(--c-success)"/>
+            </marker>
+            <marker id="arrowhead-accent" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+              <polygon points="0 0, 10 3, 0 6" fill="var(--c-accent)"/>
+            </marker>
+            <marker id="arrowhead-warning" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+              <polygon points="0 0, 10 3, 0 6" fill="var(--c-warning)"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+
+      <div class="section">
+        <h3>State Dependencies</h3>
+        <div class="dataflow">
+          <div class="dataflow-item"><strong>selectedPlan</strong> → determines payment amount</div>
+          <div class="dataflow-item"><strong>isNavigating</strong> → triggers arrival tracking</div>
+          <div class="dataflow-item"><strong>currentNavStopIndex</strong> → current stop for geofencing</div>
+          <div class="dataflow-item"><strong>routeStops</strong> → available stops for insertion</div>
+          <div class="dataflow-item error"><strong>completedStops</strong> → tracks progress for validation</div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>Error Recovery Flows</h3>
+        <ul class="checklist">
+          <li>Payment failure → User selects different method & retries</li>
+          <li>Network error → Exponential backoff retry (max 3x)</li>
+          <li>Concurrent edit → Version check rejects, ask to reload</li>
+          <li>Low GPS accuracy → Show warning, allow manual override</li>
+          <li>Geolocation denied → Fallback to manual marking</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Testing Tab -->
+    <div id="testing" class="tab-content">
+      <div class="section">
+        <h3>Payment Testing Checklist</h3>
+        <ul class="checklist">
+          <li>Payment modal opens when trip starts (non-test)</li>
+          <li>Test trip skips payment completely</li>
+          <li>Payment method selection works (card, wallet, cash)</li>
+          <li>Success flow: payment completes, badge shows, navigation enabled</li>
+          <li>Retry flow: failed payment allows retry</li>
+          <li>Offline handling: pending payment persists until network returns</li>
+          <li>Network error: exponential backoff works</li>
+          <li>Transaction ID persists in plan metadata</li>
+          <li>Payment status displays in trip header</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Stop Insertion Testing Checklist</h3>
+        <ul class="checklist">
+          <li>"Edit Itinerary" button appears in control panel</li>
+          <li>Insert before/after selection works</li>
+          <li>Modal shows current stop and insertion point</li>
+          <li>New stop title validation (non-empty required)</li>
+          <li>Preview shows updated route with new stop</li>
+          <li>Commit saves to Firebase</li>
+          <li>Route updates live after commit</li>
+          <li>Cancel discards changes</li>
+          <li>Undo support (previous state restoration)</li>
+          <li>Concurrent edit handling</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Arrival Detection Testing Checklist</h3>
+        <ul class="checklist">
+          <li>Location tracking starts when navigation begins</li>
+          <li>Geofence detection at 100m radius</li>
+          <li>Arrival notification shows countdown (5 seconds)</li>
+          <li>Auto-advance to next stop after countdown</li>
+          <li>Manual "Continue Now" button works</li>
+          <li>"Cancel" stops tracking and dismisses notification</li>
+          <li>Low accuracy warning shows (>50m)</li>
+          <li>Permission denied error handling</li>
+          <li>Works with mock locations in dev</li>
+          <li>Stops tracking when navigation ends</li>
+          <li>No excessive battery drain</li>
+        </ul>
+      </div>
+
+      <div class="section">
+        <h3>Integration Testing Checklist</h3>
+        <ul class="checklist">
+          <li>Payment must complete before navigation enabled</li>
+          <li>Stop insertion doesn't interfere with active navigation</li>
+          <li>Arrival detection respects manual "mark done" override</li>
+          <li>All three features work together seamlessly</li>
+          <li>No state conflicts between features</li>
+          <li>Proper cleanup on component unmount</li>
+          <li>Mobile device testing (real GPS)</li>
+          <li>Network throttle simulation (slow payment)</li>
+          <li>Battery impact assessment</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Implementation Timeline Tab -->
+    <div class="tabs" style="margin-top: 60px; margin-bottom: 32px;">
+      <button class="tab-button" onclick="switchTab('timeline')">Timeline</button>
+      <button class="tab-button" onclick="switchTab('api')">API Contract</button>
+      <button class="tab-button" onclick="switchTab('notes')">Implementation Notes</button>
+    </div>
+
+    <div id="timeline" class="tab-content active">
+      <div class="section">
+        <h3>Implementation Timeline</h3>
+
+        <div class="timeline">
+          <div class="timeline-item done">
+            <div class="timeline-label">Phase 1: Payment (2-3 days)</div>
+            <div class="timeline-desc">
+              Payment state hook → Modal UI → API integration → Error handling
+            </div>
+          </div>
+
+          <div class="timeline-item done">
+            <div class="timeline-label">Phase 2: Stop Insertion (2-3 days)</div>
+            <div class="timeline-desc">
+              Editor hook → Modal UI with preview → Update logic → Firebase sync
+            </div>
+          </div>
+
+          <div class="timeline-item">
+            <div class="timeline-label">Phase 3: Arrival Detection (1-2 days)</div>
+            <div class="timeline-desc">
+              Geolocation hook → Notification UI → Auto-advance → Battery optimization
+            </div>
+          </div>
+
+          <div class="timeline-item">
+            <div class="timeline-label">Phase 4: Integration & QA (2-3 days)</div>
+            <div class="timeline-desc">
+              Feature interaction testing → Edge cases → Performance → Documentation
+            </div>
+          </div>
+        </div>
+
+        <div class="success-box" style="margin-top: 32px;">
+          <strong>Total Effort:</strong> 7-11 days including testing and documentation. Can be parallelized with core team review.
+        </div>
+      </div>
+    </div>
+
+    <div id="api" class="tab-content">
+      <div class="section">
+        <h3>Payment API Endpoint</h3>
+        <div class="code-block">POST /api/payments/process
+Content-Type: application/json
+
+Request:
+{
+  "tripId": "string",
+  "amount": "number",
+  "method": "card|digital_wallet|cash_on_arrival",
+  "currency": "PHP"
+}
+
+Response:
+{
+  "success": boolean,
+  "transactionId": "string",
+  "status": "completed|failed",
+  "errorMessage": "string (if failed)"
+}</div>
+      </div>
+
+      <div class="section">
+        <h3>No Changes Needed For:</h3>
+        <ul class="checklist">
+          <li>Trip plan CRUD (existing updateTripPlan works)</li>
+          <li>Location data (browser geolocation API)</li>
+          <li>Route calculation (existing OpenStreetMap)</li>
+        </ul>
+      </div>
+    </div>
+
+    <div id="notes" class="tab-content">
+      <div class="section">
+        <h3>Implementation Notes</h3>
+
+        <div class="section" style="margin-top: 24px;">
+          <h4 style="font-weight: 600; margin-bottom: 12px;">1. Payment Provider Choice</h4>
+          <p style="color: var(--c-text-secondary); font-size: 14px;">Decide between Stripe, PayMongo, or GCash integration. Update usePaymentState accordingly.</p>
+        </div>
+
+        <div class="section">
+          <h4 style="font-weight: 600; margin-bottom: 12px;">2. Geofence Configuration</h4>
+          <p style="color: var(--c-text-secondary); font-size: 14px;">Default 100m is conservative. Test in Philippines region for GPS accuracy before adjusting.</p>
+        </div>
+
+        <div class="section">
+          <h4 style="font-weight: 600; margin-bottom: 12px;">3. Concurrent Edit Prevention</h4>
+          <p style="color: var(--c-text-secondary); font-size: 14px;">Consider adding version stamps to itineraries to prevent conflicts when multiple people edit.</p>
+        </div>
+
+        <div class="section">
+          <h4 style="font-weight: 600; margin-bottom: 12px;">4. Battery Impact</h4>
+          <p style="color: var(--c-text-secondary); font-size: 14px;">Arrival detection uses enableHighAccuracy: true. Consider user warning about battery drain.</p>
+        </div>
+
+        <div class="section">
+          <h4 style="font-weight: 600; margin-bottom: 12px;">5. Offline Support</h4>
+          <p style="color: var(--c-text-secondary); font-size: 14px;">Payment status should persist in localStorage until network returns.</p>
+        </div>
+
+        <div class="section">
+          <h4 style="font-weight: 600; margin-bottom: 12px;">6. Accessibility</h4>
+          <p style="color: var(--c-text-secondary); font-size: 14px;">Ensure arrival notification is announce-able for screen readers.</p>
+        </div>
+
+        <div class="section">
+          <h4 style="font-weight: 600; margin-bottom: 12px;">7. Mobile Testing</h4>
+          <p style="color: var(--c-text-secondary); font-size: 14px;">Test on actual devices with real GPS, not just browser dev tools.</p>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <p>Hilinga Integration Guide · Payment Processing, Stop Insertion & Arrival Detection</p>
+      <p style="margin-top: 12px; font-size: 12px;">For implementation questions, refer to INTEGRATION_GUIDE.md</p>
+    </footer>
+  </div>
+
+  <script>
+    function switchTab(tabName) {
+      // Hide all tab content
+      const contents = document.querySelectorAll('.tab-content');
+      contents.forEach(content => {
+        content.classList.remove('active');
+      });
+
+      // Remove active class from all buttons
+      const buttons = document.querySelectorAll('.tab-button');
+      buttons.forEach(button => {
+        button.classList.remove('active');
+      });
+
+      // Show selected tab content
+      const selectedContent = document.getElementById(tabName);
+      if (selectedContent) {
+        selectedContent.classList.add('active');
+      }
+
+      // Add active class to clicked button
+      event.target.classList.add('active');
+    }
+  </script>
+</body>
+</html>

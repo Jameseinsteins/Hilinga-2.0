@@ -10,6 +10,9 @@
     },
     "api/health.ts": {
       "maxDuration": 10
+    },
+    "api/itinerary-chat.ts": {
+      "maxDuration": 60
     }
   }
 }

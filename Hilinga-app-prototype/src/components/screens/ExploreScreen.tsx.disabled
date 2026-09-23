@@ -1,0 +1,1049 @@
+/**
+ * ExploreScreen Component
+ *
+ * Manages exploration of places, businesses, and experiences.
+ * Uses useExploreState hook for organized state management and memoization
+ * to prevent unnecessary re-renders of filtered/sorted results.
+ */
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { CommunityPost } from "@/lib/community-feed";
+import {
+  createCommunityPost,
+  deleteCommunityPost,
+  subscribeToCommunityPosts,
+} from "@/lib/community-feed";
+import {
+  BusinessPost,
+  RegisteredSmallBusiness,
+  readPublishedBusinessPosts,
+  readRegisteredSmallBusinesses,
+} from "@/lib/business-content";
+import {
+  recordBusinessProfileView,
+  sendBusinessInquiry,
+  setBusinessPostLiked,
+  subscribeToLikedBusinessPosts,
+} from "@/lib/business-engagement";
+import {
+  getSavedIds,
+  getSavedItems,
+  removeAllSavedItems,
+  removeSavedItem,
+  saveItem,
+} from "@/lib/cloud-user-data";
+import { useExploreState } from "@/hooks/useExploreState";
+import { useAuth } from "@/providers/auth-provider";
+import { useDatabase } from "@/providers/database-provider";
+
+interface ExploreScreenProps {
+  catalog: Array<{
+    id: string;
+    name: string;
+    subtitle: string;
+    category: string;
+    kind: "Places" | "Businesses" | "Events" | "Experiences";
+    savedKind: string;
+    visits: number;
+    imageKey: string;
+    source: string;
+    latitude: number;
+    longitude: number;
+    detail?: string;
+    location?: string;
+    logoSource?: string;
+    businessScale?: "Small business" | "Big enterprise";
+    registered?: boolean;
+    ownerUid?: string;
+  }>;
+}
+
+export function ExploreScreen({ catalog }: ExploreScreenProps) {
+  const { user } = useAuth();
+  const { db } = useDatabase();
+  const [state, actions] = useExploreState();
+  const [businessPosts, setBusinessPosts] = useState<BusinessPost[]>([]);
+  const [registeredBusinesses, setRegisteredBusinesses] = useState<RegisteredSmallBusiness[]>([]);
+  const [likedBusinessPostIds, setLikedBusinessPostIds] = useState<Set<string>>(new Set());
+
+  // Load saved items on mount
+  useEffect(() => {
+    if (!user?.uid || !db) return;
+
+    getSavedIds(db, user.uid)
+      .then((ids) => actions.setSavedIds(ids))
+      .catch(() => {
+        /* silent fail */
+      });
+  }, [user?.uid, db]);
+
+  // Subscribe to business posts
+  useEffect(() => {
+    const unsubscribe = subscribeToPublishedBusinessPosts(
+      (posts) => setBusinessPosts(posts),
+      () => {
+        /* error handling */
+      },
+    );
+    return () => unsubscribe?.();
+  }, []);
+
+  // Subscribe to community posts (reviews)
+  useEffect(() => {
+    const unsubscribe = subscribeToCommunityPosts(
+      (posts) => {
+        actions.setReviews(posts);
+        actions.setReviewsLoading(false);
+      },
+      () => {
+        actions.setReviewError("Failed to load reviews");
+        actions.setReviewsLoading(false);
+      },
+    );
+    return () => unsubscribe?.();
+  }, []);
+
+  // Subscribe to liked business posts
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const unsubscribe = subscribeToLikedBusinessPosts(
+      user.uid,
+      (likedIds) => setLikedBusinessPostIds(likedIds),
+      () => {
+        /* error handling */
+      },
+    );
+    return () => unsubscribe?.();
+  }, [user?.uid]);
+
+  // Load registered businesses
+  useEffect(() => {
+    const businesses = readRegisteredSmallBusinesses();
+    setRegisteredBusinesses(businesses);
+  }, []);
+
+  // Memoize filtered and sorted results
+  const filteredResults = useMemo(() => {
+    let results = catalog;
+
+    // Filter by kind
+    if (state.kind !== "All") {
+      results = results.filter((item) => item.kind === state.kind);
+    }
+
+    // Filter by search query
+    if (state.query.trim()) {
+      const query = state.query.toLowerCase();
+      results = results.filter(
+        (item) =>
+          item.name.toLowerCase().includes(query) ||
+          item.subtitle.toLowerCase().includes(query) ||
+          item.category.toLowerCase().includes(query),
+      );
+    }
+
+    // Filter by custom filter
+    if (state.filter && state.filter !== "All") {
+      results = results.filter((item) => item.category === state.filter);
+    }
+
+    // Sort based on view
+    if (state.view === "Latest") {
+      results = [...results].sort((a, b) => b.visits - a.visits);
+    } else if (state.view === "All") {
+      results = [...results].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    // "For you" uses original catalog order
+
+    return results;
+  }, [catalog, state.kind, state.query, state.filter, state.view]);
+
+  // Memoize business posts for the selected business
+  const selectedBusinessPosts = useMemo(() => {
+    if (!state.selected || state.selected.kind !== "Businesses") return [];
+    return businessPosts.filter((post) => post.businessId === `registered-${state.selected?.ownerUid}`);
+  }, [state.selected, businessPosts]);
+
+  // Memoize reviews for the selected item
+  const selectedItemReviews = useMemo(() => {
+    if (!state.selected) return [];
+    return state.reviews.filter((review) => review.itemId === state.selected?.id);
+  }, [state.selected, state.reviews]);
+
+  // Handle select item
+  const handleSelectItem = useCallback(
+    (item: (typeof catalog)[0]) => {
+      actions.setSelected(item as any);
+
+      // Record view for businesses
+      if (item.kind === "Businesses" && item.ownerUid && user?.uid) {
+        recordBusinessProfileView(user.uid, item.ownerUid).catch(() => {
+          /* error handling */
+        });
+      }
+    },
+    [user?.uid, actions],
+  );
+
+  // Handle save/unsave item
+  const handleToggleSaved = useCallback(
+    async (item: (typeof catalog)[0]) => {
+      if (!user?.uid || !db) return;
+
+      const isSaved = state.savedIds.has(item.id);
+
+      try {
+        if (isSaved) {
+          await removeSavedItem(db, user.uid, item.savedKind, item.id);
+          const newIds = new Set(state.savedIds);
+          newIds.delete(item.id);
+          actions.setSavedIds(newIds);
+        } else {
+          await saveItem(db, user.uid, item.savedKind, item.id, {
+            name: item.name,
+            latitude: item.latitude,
+            longitude: item.longitude,
+          });
+          actions.setSavedIds(new Set([...state.savedIds, item.id]));
+        }
+      } catch {
+        actions.setError("Failed to save item");
+      }
+    },
+    [user?.uid, db, state.savedIds, actions],
+  );
+
+  // Handle post review
+  const handlePostReview = useCallback(async () => {
+    if (!state.selected || !user?.uid || !state.reviewText || state.reviewRating === null) return;
+
+    actions.setReviewPosting(true);
+    try {
+      const post: CommunityPost = {
+        id: `${Date.now()}-${Math.random()}`,
+        itemId: state.selected.id,
+        authorUid: user.uid,
+        authorName: "Anonymous",
+        rating: state.reviewRating,
+        text: state.reviewText,
+        createdAt: new Date().toISOString(),
+      };
+
+      await createCommunityPost(post);
+      actions.resetReviewForm();
+    } catch {
+      actions.setReviewError("Failed to post review");
+    } finally {
+      actions.setReviewPosting(false);
+    }
+  }, [state.selected, user?.uid, state.reviewText, state.reviewRating, actions]);
+
+  // Handle delete review
+  const handleDeleteReview = useCallback(
+    async (review: CommunityPost) => {
+      if (!user?.uid) return;
+      try {
+        await deleteCommunityPost(review.id);
+        actions.setReviews(state.reviews.filter((r) => r.id !== review.id));
+      } catch {
+        actions.setReviewError("Failed to delete review");
+      }
+    },
+    [user?.uid, state.reviews, actions],
+  );
+
+  // Handle send inquiry
+  const handleSendInquiry = useCallback(async () => {
+    if (!state.selected || !user?.uid || !state.inquiryMessage) return;
+
+    actions.setInquirySending(true);
+    try {
+      await sendBusinessInquiry(user.uid, state.selected.ownerUid || "", {
+        itemId: state.selected.id,
+        message: state.inquiryMessage,
+        senderName: "App User",
+      });
+      actions.setInquirySent(true);
+      setTimeout(() => actions.resetInquiryForm(), 1500);
+    } catch {
+      actions.setInquiryError("Failed to send inquiry");
+    } finally {
+      actions.setInquirySending(false);
+    }
+  }, [state.selected, user?.uid, state.inquiryMessage, actions]);
+
+  // Handle like business post
+  const handleLikePost = useCallback(
+    async (post: BusinessPost) => {
+      if (!user?.uid) return;
+      try {
+        const isLiked = likedBusinessPostIds.has(post.id);
+        await setBusinessPostLiked(user.uid, post.id, !isLiked);
+        const newLiked = new Set(likedBusinessPostIds);
+        if (isLiked) {
+          newLiked.delete(post.id);
+        } else {
+          newLiked.add(post.id);
+        }
+        setLikedBusinessPostIds(newLiked);
+      } catch {
+        actions.setError("Failed to like post");
+      }
+    },
+    [user?.uid, likedBusinessPostIds, actions],
+  );
+
+  return (
+    <div className="explore-screen">
+      {/* Search & Filters */}
+      <div className="explore-header">
+        <input
+          type="text"
+          className="search-input"
+          placeholder="Search places, businesses..."
+          value={state.query}
+          onChange={(e) => actions.setQuery(e.target.value)}
+        />
+
+        <div className="filter-tabs">
+          <button
+            className={`filter-tab ${state.kind === "All" ? "active" : ""}`}
+            onClick={() => actions.setKind("All")}
+          >
+            All
+          </button>
+          <button
+            className={`filter-tab ${state.kind === "Places" ? "active" : ""}`}
+            onClick={() => actions.setKind("Places")}
+          >
+            Places
+          </button>
+          <button
+            className={`filter-tab ${state.kind === "Businesses" ? "active" : ""}`}
+            onClick={() => actions.setKind("Businesses")}
+          >
+            Businesses
+          </button>
+          <button
+            className={`filter-tab ${state.kind === "Events" ? "active" : ""}`}
+            onClick={() => actions.setKind("Events")}
+          >
+            Events
+          </button>
+        </div>
+
+        <div className="view-controls">
+          <button
+            className={`view-btn ${state.view === "For you" ? "active" : ""}`}
+            onClick={() => actions.setView("For you")}
+          >
+            For you
+          </button>
+          <button
+            className={`view-btn ${state.view === "Latest" ? "active" : ""}`}
+            onClick={() => actions.setView("Latest")}
+          >
+            Latest
+          </button>
+          <button
+            className={`view-btn ${state.view === "All" ? "active" : ""}`}
+            onClick={() => actions.setView("All")}
+          >
+            A-Z
+          </button>
+        </div>
+      </div>
+
+      {/* Results Grid */}
+      {!state.selected && (
+        <div className="explore-grid">
+          {filteredResults.length === 0 ? (
+            <div className="explore-empty">
+              <p>No results found</p>
+            </div>
+          ) : (
+            filteredResults.map((item) => (
+              <div key={item.id} className="explore-card">
+                <div
+                  className="card-image"
+                  style={{ backgroundImage: `url(${item.source})` }}
+                  onClick={() => handleSelectItem(item)}
+                >
+                  <button
+                    className={`save-btn ${state.savedIds.has(item.id) ? "saved" : ""}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleSaved(item);
+                    }}
+                  >
+                    ♡
+                  </button>
+                </div>
+                <div className="card-content">
+                  <h3 className="card-title">{item.name}</h3>
+                  <p className="card-subtitle">{item.subtitle}</p>
+                  <div className="card-meta">
+                    <span className="category">{item.category}</span>
+                    <span className="visits">👁️ {item.visits.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Item Detail View */}
+      {state.selected && (
+        <div className="explore-detail">
+          <button className="back-btn" onClick={() => actions.setSelected(null)}>
+            ← Back
+          </button>
+
+          <div className="detail-header">
+            <img src={state.selected.source} alt={state.selected.name} className="detail-image" />
+            <div className="detail-info">
+              <h2>{state.selected.name}</h2>
+              <p className="detail-subtitle">{state.selected.subtitle}</p>
+              {state.selected.location && <p className="detail-location">📍 {state.selected.location}</p>}
+              <div className="detail-actions">
+                <button
+                  className={`action-btn ${state.savedIds.has(state.selected.id) ? "saved" : ""}`}
+                  onClick={() => handleToggleSaved(state.selected!)}
+                >
+                  {state.savedIds.has(state.selected.id) ? "Saved" : "Save"}
+                </button>
+                {state.selected.kind === "Businesses" && (
+                  <button
+                    className="action-btn"
+                    onClick={() => actions.setInquiryOpen(true)}
+                  >
+                    Send Inquiry
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Business Posts */}
+          {state.selected.kind === "Businesses" && selectedBusinessPosts.length > 0 && (
+            <div className="business-posts-section">
+              <h3>Latest Posts</h3>
+              {selectedBusinessPosts.map((post) => (
+                <div key={post.id} className="business-post">
+                  <img src={post.mediaUrl} alt={post.title} className="post-image" />
+                  <div className="post-content">
+                    <h4>{post.title}</h4>
+                    <p>{post.detail}</p>
+                    <button
+                      className={`like-btn ${likedBusinessPostIds.has(post.id) ? "liked" : ""}`}
+                      onClick={() => handleLikePost(post)}
+                    >
+                      ❤️ Like
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Reviews Section */}
+          <div className="reviews-section">
+            <h3>Reviews ({selectedItemReviews.length})</h3>
+
+            {/* Post Review Form */}
+            <div className="review-form">
+              <textarea
+                placeholder="Share your experience..."
+                value={state.reviewText}
+                onChange={(e) => actions.setReviewText(e.target.value)}
+                className="review-textarea"
+              />
+              <div className="review-controls">
+                <div className="rating-selector">
+                  {[1, 2, 3, 4, 5].map((rating) => (
+                    <button
+                      key={rating}
+                      className={`star ${state.reviewRating === rating ? "active" : ""}`}
+                      onClick={() => actions.setReviewRating(rating)}
+                    >
+                      ★
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="submit-review-btn"
+                  onClick={handlePostReview}
+                  disabled={state.reviewPosting || !state.reviewText || state.reviewRating === null}
+                >
+                  {state.reviewPosting ? "Posting..." : "Post Review"}
+                </button>
+              </div>
+              {state.reviewError && <p className="error-text">{state.reviewError}</p>}
+            </div>
+
+            {/* Reviews List */}
+            {selectedItemReviews.map((review) => (
+              <div key={review.id} className="review-item">
+                <div className="review-header">
+                  <strong>{review.authorName}</strong>
+                  <div className="review-rating">
+                    {"★".repeat(review.rating)}
+                    {"☆".repeat(5 - review.rating)}
+                  </div>
+                </div>
+                <p className="review-text">{review.text}</p>
+                {user?.uid === review.authorUid && (
+                  <button
+                    className="delete-review-btn"
+                    onClick={() => handleDeleteReview(review)}
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Inquiry Modal */}
+          {state.inquiryOpen && (
+            <div className="modal-backdrop" onClick={() => actions.setInquiryOpen(false)}>
+              <div className="modal" onClick={(e) => e.stopPropagation()}>
+                <h3>Send Inquiry to {state.selected.name}</h3>
+                <textarea
+                  placeholder="Tell them what you're interested in..."
+                  value={state.inquiryMessage}
+                  onChange={(e) => actions.setInquiryMessage(e.target.value)}
+                  className="inquiry-textarea"
+                />
+                <div className="modal-buttons">
+                  <button onClick={() => actions.setInquiryOpen(false)} className="btn-cancel">
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSendInquiry}
+                    disabled={state.inquirySending}
+                    className="btn-send"
+                  >
+                    {state.inquirySending ? "Sending..." : "Send"}
+                  </button>
+                </div>
+                {state.inquirySent && <p className="success-text">Inquiry sent!</p>}
+                {state.inquiryError && <p className="error-text">{state.inquiryError}</p>}
+              </div>
+            </div>
+          )}
+
+          {/* Error Display */}
+          {state.error && (
+            <div className="error-banner">
+              <p>{state.error}</p>
+              <button onClick={() => actions.setError(null)}>×</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      <style>{`
+        .explore-screen {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          gap: 0;
+        }
+
+        .explore-header {
+          padding: 16px;
+          border-bottom: 1px solid var(--c-border, #ddd);
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .search-input {
+          width: 100%;
+          padding: 10px 12px;
+          border: 1px solid var(--c-border, #ddd);
+          border-radius: 8px;
+          font-size: 14px;
+          font-family: inherit;
+        }
+
+        .filter-tabs,
+        .view-controls {
+          display: flex;
+          gap: 8px;
+          overflow-x: auto;
+        }
+
+        .filter-tab,
+        .view-btn {
+          padding: 8px 12px;
+          border: 1px solid var(--c-border, #ddd);
+          border-radius: 6px;
+          background: white;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: all 0.2s ease;
+        }
+
+        .filter-tab:hover,
+        .view-btn:hover {
+          border-color: var(--c-primary, #007AFF);
+        }
+
+        .filter-tab.active,
+        .view-btn.active {
+          background: var(--c-primary, #007AFF);
+          color: white;
+          border-color: var(--c-primary, #007AFF);
+        }
+
+        .explore-grid {
+          flex: 1;
+          overflow-y: auto;
+          padding: 12px;
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+          gap: 12px;
+        }
+
+        .explore-empty {
+          grid-column: 1 / -1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          height: 100%;
+          color: var(--c-text-secondary, #666);
+          font-size: 14px;
+        }
+
+        .explore-card {
+          background: white;
+          border-radius: 12px;
+          overflow: hidden;
+          border: 1px solid var(--c-border, #ddd);
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+
+        .explore-card:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .card-image {
+          width: 100%;
+          aspect-ratio: 4/3;
+          background-size: cover;
+          background-position: center;
+          position: relative;
+        }
+
+        .save-btn {
+          position: absolute;
+          top: 8px;
+          right: 8px;
+          background: white;
+          border: none;
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          cursor: pointer;
+          font-size: 16px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s ease;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .save-btn:hover {
+          transform: scale(1.1);
+        }
+
+        .save-btn.saved {
+          color: var(--c-red, #ef4444);
+        }
+
+        .card-content {
+          padding: 12px;
+        }
+
+        .card-title {
+          margin: 0 0 4px 0;
+          font-size: 13px;
+          font-weight: 700;
+          color: var(--c-text-primary, #1a1a1a);
+        }
+
+        .card-subtitle {
+          margin: 0 0 8px 0;
+          font-size: 12px;
+          color: var(--c-text-secondary, #666);
+          line-height: 1.3;
+        }
+
+        .card-meta {
+          display: flex;
+          gap: 8px;
+          font-size: 11px;
+        }
+
+        .category {
+          background: var(--c-primary, #007AFF);
+          color: white;
+          padding: 2px 6px;
+          border-radius: 3px;
+        }
+
+        .visits {
+          color: var(--c-text-secondary, #999);
+        }
+
+        .explore-detail {
+          flex: 1;
+          overflow-y: auto;
+          padding: 12px;
+        }
+
+        .back-btn {
+          background: none;
+          border: none;
+          color: var(--c-primary, #007AFF);
+          cursor: pointer;
+          font-weight: 600;
+          font-size: 14px;
+          margin-bottom: 12px;
+        }
+
+        .detail-header {
+          margin-bottom: 20px;
+        }
+
+        .detail-image {
+          width: 100%;
+          border-radius: 12px;
+          margin-bottom: 12px;
+        }
+
+        .detail-info h2 {
+          margin: 0 0 4px 0;
+          font-size: 20px;
+          font-weight: 800;
+        }
+
+        .detail-subtitle {
+          margin: 0 0 8px 0;
+          color: var(--c-text-secondary, #666);
+          font-size: 14px;
+        }
+
+        .detail-location {
+          margin: 0 0 12px 0;
+          color: var(--c-text-secondary, #999);
+          font-size: 13px;
+        }
+
+        .detail-actions {
+          display: flex;
+          gap: 8px;
+        }
+
+        .action-btn {
+          flex: 1;
+          padding: 10px;
+          background: var(--c-primary, #007AFF);
+          color: white;
+          border: none;
+          border-radius: 8px;
+          font-weight: 600;
+          cursor: pointer;
+          font-size: 13px;
+        }
+
+        .action-btn.saved {
+          background: var(--c-success, #10b981);
+        }
+
+        .business-posts-section {
+          margin-bottom: 20px;
+        }
+
+        .business-posts-section h3 {
+          margin: 0 0 12px 0;
+          font-size: 14px;
+          font-weight: 700;
+        }
+
+        .business-post {
+          border: 1px solid var(--c-border, #ddd);
+          border-radius: 8px;
+          overflow: hidden;
+          margin-bottom: 12px;
+        }
+
+        .post-image {
+          width: 100%;
+          aspect-ratio: 16/9;
+          object-fit: cover;
+        }
+
+        .post-content {
+          padding: 12px;
+        }
+
+        .post-content h4 {
+          margin: 0 0 4px 0;
+          font-size: 13px;
+          font-weight: 700;
+        }
+
+        .post-content p {
+          margin: 0 0 8px 0;
+          font-size: 12px;
+          color: var(--c-text-secondary, #666);
+        }
+
+        .like-btn {
+          background: white;
+          border: 1px solid var(--c-border, #ddd);
+          padding: 6px 12px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 600;
+        }
+
+        .like-btn.liked {
+          background: var(--c-red, #ef4444);
+          color: white;
+          border-color: var(--c-red, #ef4444);
+        }
+
+        .reviews-section {
+          margin-bottom: 20px;
+        }
+
+        .reviews-section h3 {
+          margin: 0 0 12px 0;
+          font-size: 14px;
+          font-weight: 700;
+        }
+
+        .review-form {
+          background: var(--c-bg-secondary, #f5f5f5);
+          padding: 12px;
+          border-radius: 8px;
+          margin-bottom: 12px;
+        }
+
+        .review-textarea {
+          width: 100%;
+          min-height: 80px;
+          padding: 10px;
+          border: 1px solid var(--c-border, #ddd);
+          border-radius: 6px;
+          font-family: inherit;
+          font-size: 13px;
+          resize: vertical;
+          margin-bottom: 8px;
+        }
+
+        .review-controls {
+          display: flex;
+          gap: 8px;
+          justify-content: space-between;
+          align-items: center;
+        }
+
+        .rating-selector {
+          display: flex;
+          gap: 4px;
+        }
+
+        .star {
+          background: none;
+          border: none;
+          font-size: 18px;
+          cursor: pointer;
+          color: var(--c-text-secondary, #ccc);
+        }
+
+        .star.active {
+          color: var(--c-warning, #f59e0b);
+        }
+
+        .submit-review-btn {
+          background: var(--c-primary, #007AFF);
+          color: white;
+          border: none;
+          padding: 8px 16px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-weight: 600;
+          font-size: 13px;
+        }
+
+        .submit-review-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .review-item {
+          background: white;
+          border: 1px solid var(--c-border, #ddd);
+          border-radius: 8px;
+          padding: 12px;
+          margin-bottom: 8px;
+        }
+
+        .review-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 8px;
+        }
+
+        .review-rating {
+          font-size: 12px;
+          color: var(--c-warning, #f59e0b);
+        }
+
+        .review-text {
+          margin: 0 0 8px 0;
+          font-size: 13px;
+          color: var(--c-text-primary, #1a1a1a);
+          line-height: 1.4;
+        }
+
+        .delete-review-btn {
+          background: none;
+          border: none;
+          color: var(--c-red, #ef4444);
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 600;
+        }
+
+        .modal-backdrop {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.5);
+          display: flex;
+          align-items: flex-end;
+          z-index: 100;
+        }
+
+        .modal {
+          background: white;
+          width: 100%;
+          padding: 20px;
+          border-radius: 12px 12px 0 0;
+          max-height: 80vh;
+          overflow-y: auto;
+        }
+
+        .modal h3 {
+          margin: 0 0 12px 0;
+          font-size: 16px;
+          font-weight: 700;
+        }
+
+        .inquiry-textarea {
+          width: 100%;
+          min-height: 100px;
+          padding: 10px;
+          border: 1px solid var(--c-border, #ddd);
+          border-radius: 6px;
+          font-family: inherit;
+          font-size: 14px;
+          resize: vertical;
+          margin-bottom: 12px;
+        }
+
+        .modal-buttons {
+          display: flex;
+          gap: 8px;
+        }
+
+        .btn-cancel,
+        .btn-send {
+          flex: 1;
+          padding: 10px;
+          border: none;
+          border-radius: 6px;
+          font-weight: 600;
+          cursor: pointer;
+          font-size: 14px;
+        }
+
+        .btn-cancel {
+          background: var(--c-border, #ddd);
+          color: var(--c-text-primary, #1a1a1a);
+        }
+
+        .btn-send {
+          background: var(--c-primary, #007AFF);
+          color: white;
+        }
+
+        .btn-send:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        .success-text {
+          color: var(--c-success, #10b981);
+          font-size: 13px;
+          margin-top: 8px;
+        }
+
+        .error-text {
+          color: var(--c-error, #dc2626);
+          font-size: 13px;
+          margin-top: 8px;
+        }
+
+        .error-banner {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          background: var(--c-error, #dc2626);
+          color: white;
+          padding: 12px 16px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          z-index: 1000;
+        }
+
+        .error-banner p {
+          margin: 0;
+        }
+
+        .error-banner button {
+          background: none;
+          border: none;
+          color: white;
+          cursor: pointer;
+          font-size: 20px;
+          font-weight: 700;
+        }
+
+        @media (max-width: 768px) {
+          .explore-grid {
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+          }
+        }
+      `}</style>
+    </div>
+  );
+}

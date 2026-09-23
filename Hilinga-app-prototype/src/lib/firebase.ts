@@ -1,6 +1,11 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { browserLocalPersistence, getAuth, setPersistence } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
@@ -22,5 +27,18 @@ export const firebaseApp = getApps().length
 export const auth = getAuth(firebaseApp);
 void setPersistence(auth, browserLocalPersistence).catch(() => undefined);
 
-export const firestore = getFirestore(firebaseApp);
+// Enable offline persistence so Firestore reads work when client is offline
+// (fixes "Failed to get document because the client is offline" for QR).
+// Falls back to plain getFirestore on hot-reload or if init was already called.
+let _firestore: ReturnType<typeof getFirestore>;
+try {
+  _firestore = initializeFirestore(firebaseApp, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager(),
+    }),
+  });
+} catch {
+  _firestore = getFirestore(firebaseApp);
+}
+export const firestore = _firestore;
 export const storage = getStorage(firebaseApp);

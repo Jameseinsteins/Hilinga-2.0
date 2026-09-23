@@ -1,6 +1,10 @@
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { MapPlace, MapRouteStop, MapTerminal, OpenStreetMap } from "@/components/openstreet-map";
+import { BusinessRegistrationDashboard } from "@/components/business-registration-dashboard";
+// NOTE: MapScreen and ExploreScreen need API fixes - temporarily disabled
+// import { MapScreen } from "@/components/screens/MapScreen";
+// import { ExploreScreen } from "@/components/screens/ExploreScreen";
 
 import {
   ItineraryDay,
@@ -24,6 +28,9 @@ import {
 } from "@/lib/cloud-user-data";
 import type { AvatarUpload } from "@/lib/cloud-profile";
 import { generateAiItinerary } from "@/lib/ai-itinerary";
+import { ItineraryChatPanel } from "@/components/itinerary-chat-panel";
+import { SkeletonPlanner, SkeletonProfile, SkeletonSaved } from "@/components/skeleton";
+import { Tooltip } from "@/components/tooltip";
 import {
   BUSINESS_CONTENT_CHANGED_EVENT,
   BusinessPost,
@@ -110,7 +117,7 @@ const routeDestinations = [
   ...catalog,
   { id: "bacacay-coast", name: "Bacacay coast and island views", subtitle: "Beach and island route", latitude: 13.2922, longitude: 123.7930 },
   { id: "mayon-trail", name: "Mayon nature and photography walk", subtitle: "Nature trail and viewpoint", latitude: 13.1574, longitude: 123.7465 },
-  { id: "mayon-atv", name: "Mayon ATV adventure", subtitle: "Adventure activity", latitude: 13.1722, longitude: 123.6990 },
+  { id: "mayon-atv", name: "Mayon ATV Adventure", subtitle: "Adventure activity", latitude: 13.1722, longitude: 123.6990 },
   { id: "camalig-food", name: "Market shopping and Bicolano tasting", subtitle: "Food and local market", latitude: 13.1471, longitude: 123.6591 },
   { id: "albay-museum", name: "Albay arts and museum stop", subtitle: "Arts and culture", latitude: 13.1392, longitude: 123.7345 },
   { id: "legazpi-market", name: "Local market and crafts", subtitle: "Shopping and crafts", latitude: 13.1435, longitude: 123.7522 },
@@ -1843,7 +1850,7 @@ const plannerQuestions: PlannerQuestion[] = [
   { key: "sections", prompt: "Which information should I include? Select as many as you like.", kind: "multi", options: sectionOptions.map((value) => ({ label: value, value, icon: "add_task" })), optional: true },
   { key: "excludedPlaces", prompt: "Are there any places you do not want in the plan?", kind: "multi", options: [
     { label: "Cagsawa Ruins", value: "Cagsawa Ruins", icon: "block", description: "Already visited" },
-    { label: "Mayon ATV Trail", value: "Mayon ATV Trail", icon: "block", description: "Skip extreme rides" },
+    { label: "Mayon ATV Adventure", value: "Mayon ATV Adventure", icon: "block", description: "Skip extreme rides" },
     { label: "Ligñon Hill", value: "Ligñon Hill", icon: "block", description: "Already visited" },
     { label: "Daraga Church", value: "Daraga Church", icon: "block", description: "Already visited" },
   ], optional: true, placeholder: "e.g. Cagsawa Ruins, Daraga Church" },
@@ -2012,10 +2019,10 @@ function buildItinerary(answers: PlannerAnswers, registeredBusinesses: Registere
   const flexibleTimes = ["Morning", "Late morning", "Afternoon", "Evening"];
   const activityCatalog: Record<string, PlannerActivity> = {
     "Beaches and islands": { title: "Bacacay coast and island views", icon: "beach_access", base: "Enjoy an unhurried stretch by the water." },
-    "Nature and hiking": { title: "Mayon nature trail", icon: "hiking", base: "Choose a marked trail suited to your group’s mobility." },
-    "Adventure activities": { title: "Mayon ATV adventure", icon: "sports_motorsports", base: "Pick a route and operator that match your experience level." },
-    "Food and local cuisine": { title: "Bicolano tasting lunch", icon: "restaurant", base: "Try pinangat, Bicol Express, pili treats, and local coffee." },
-    "Culture and history": { title: "Cagsawa heritage visit", icon: "account_balance", base: "Explore local stories with a clear view of Mayon." },
+    "Nature and hiking": { title: "Mayon nature and photography walk", icon: "hiking", base: "Choose a marked trail suited to your group’s mobility." },
+    "Adventure activities": { title: "Mayon ATV Adventure", icon: "sports_motorsports", base: "Pick a route and operator that match your experience level." },
+    "Food and local cuisine": { title: "Market shopping and Bicolano tasting", icon: "restaurant", base: "Try pinangat, Bicol Express, pili treats, and local coffee." },
+    "Culture and history": { title: "Cagsawa Ruins", icon: "account_balance", base: "Explore local stories with a clear view of Mayon." },
     "Arts and museums": { title: "Albay arts and museum stop", icon: "museum", base: "Browse regional art, artifacts, and community history." },
     "Shopping": { title: "Local market and crafts", icon: "shopping_bag", base: "Look for pili products, abaca crafts, and locally made gifts." },
     "Nightlife": { title: "Legazpi evening spots", icon: "nightlife", base: "Wind down at a lively but convenient local venue." },
@@ -2023,10 +2030,10 @@ function buildItinerary(answers: PlannerAnswers, registeredBusinesses: Registere
     "Wellness and relaxation": { title: "Lakeside rest and wellness break", icon: "spa", base: "Keep this block spacious and restorative." },
     "Family-friendly activities": { title: "Albay Park & Wildlife", icon: "family_restroom", base: "A gentle, flexible stop for travelers of different ages." },
     "Romantic experiences": { title: "Sunset at Legazpi Boulevard", icon: "favorite", base: "Take a slow waterfront walk and pause for dinner." },
-    "Religious or spiritual sites": { title: "Daraga Church and quiet reflection", icon: "church", base: "Visit respectfully and allow time to enjoy the viewpoint." },
+    "Religious or spiritual sites": { title: "Daraga faith and heritage trail", icon: "church", base: "Visit respectfully and allow time to enjoy the viewpoint." },
     "Festivals and events": { title: "Local festival or community event", icon: "celebration", base: "Check the local calendar and current admission details." },
     "Hidden gems": { title: "Guide-picked Albay hidden gem", icon: "explore", base: "Leave room for a lesser-known stop recommended locally." },
-    "Other interests specified by the user": { title: "Your custom-interest activity", icon: "interests", base: answers.requirements || "Match this stop to the additional interest you described." },
+    "Other interests specified by the user": { title: "Guide-picked Albay hidden gem", icon: "interests", base: answers.requirements || "Match this stop to the additional interest you described." },
   };
   const selected = answers.interests?.length ? answers.interests : ["Nature and hiking", "Food and local cuisine", "Culture and history"];
   const priority = answers.priorityInterests ?? [];
@@ -2036,7 +2043,7 @@ function buildItinerary(answers: PlannerAnswers, registeredBusinesses: Registere
     if (interest === "Nature and hiking" && ordered.includes("Photography")) return { ...activityCatalog[interest], title: "Mayon nature and photography walk" };
     if (interest === "Culture and history" && ordered.includes("Religious or spiritual sites")) return { ...activityCatalog[interest], title: "Daraga faith and heritage trail" };
     if (interest === "Food and local cuisine" && ordered.includes("Shopping")) return { ...activityCatalog[interest], title: "Market shopping and Bicolano tasting" };
-    return activityCatalog[interest] ?? { title: interest, icon: "interests", base: `Include an experience tailored to ${interest}.` };
+    return activityCatalog[interest] ?? { title: "Guide-picked Albay hidden gem", icon: "explore", base: `Local recommendation for your interest: ${interest}.` };
   }).filter((activity, index, activities) => activity && activities.findIndex((item) => item?.title === activity.title) === index);
   const fallbacks = [activityCatalog["Nature and hiking"], activityCatalog["Food and local cuisine"], activityCatalog["Culture and history"], activityCatalog["Romantic experiences"]];
   const matchingBusinesses = registeredBusinesses.filter((business) => {
@@ -2053,7 +2060,7 @@ function buildItinerary(answers: PlannerAnswers, registeredBusinesses: Registere
     .filter((activity): activity is PlannerActivity => Boolean(activity) && !isExcludedActivity(activity, exclusions));
   const weightedPreferences = priorityActivities.length ? [...preferred, ...priorityActivities] : preferred;
   const activities = [weightedPreferences[0], ...weightedPreferences.slice(1, 2), ...localBusinesses, ...weightedPreferences.slice(2), ...remaining].filter((activity): activity is PlannerActivity => Boolean(activity));
-  if (activities.length === 0) activities.push({ title: `${destination} free exploration`, icon: "explore", base: "Choose a locally recommended stop that respects your excluded-place list." });
+  if (activities.length === 0) activities.push({ title: "Guide-picked Albay hidden gem", icon: "explore", base: "Choose a locally recommended stop that respects your excluded-place list." });
   const standardBudgets = ["Budget", "Moderate", "Premium"];
   const travelerCount = parseTravelerCount(answers.travelers);
   const noteFor = (activity: PlannerActivity, stopIndex: number) => {
@@ -2199,12 +2206,12 @@ function ReplacePlaceModal({
   const registeredBusinesses = useMemo(() => readRegisteredSmallBusinesses(), [visible]);
   const defaultSuggestions = useMemo(() => [
     { title: "Cagsawa Ruins", category: "Historic Site", location: "Daraga, Albay", icon: "account_balance" },
-    { title: "Mayon ATV Trail", category: "Adventure", location: "Mayon Foothills", icon: "sports_motorsports" },
+    { title: "Mayon ATV Adventure", category: "Adventure", location: "Mayon Foothills", icon: "sports_motorsports" },
     { title: "Sumlang Lake", category: "Nature & Views", location: "Camalig, Albay", icon: "water_drop" },
-    { title: "Mayon Skyline & Park", category: "Nature & Views", location: "Tabaco City, Albay", icon: "landscape" },
-    { title: "Daraga Church & Viewpoint", category: "Culture & History", location: "Daraga, Albay", icon: "church" },
-    { title: "Legazpi Boulevard & Port", category: "Dining & Sunset", location: "Legazpi City", icon: "beach_access" },
-    { title: "Quitinday Hills & Cave", category: "Hiking & Gems", location: "Camalig, Albay", icon: "explore" },
+    { title: "Mayon Skyline", category: "Nature & Views", location: "Tabaco City, Albay", icon: "landscape" },
+    { title: "Daraga faith and heritage trail", category: "Culture & History", location: "Daraga, Albay", icon: "church" },
+    { title: "Sunset at Legazpi Boulevard", category: "Dining & Sunset", location: "Legazpi City", icon: "beach_access" },
+    { title: "Quitinday Hills", category: "Hiking & Gems", location: "Camalig, Albay", icon: "explore" },
     { title: "Vera Falls", category: "Nature & Waterfalls", location: "Malinao, Albay", icon: "water_drop" },
   ], []);
 
@@ -2330,6 +2337,7 @@ function Planner({ onOpenMap }: { onOpenMap: (planId: string) => void }) {
   const [registeredBusinesses, setRegisteredBusinesses] = useState<RegisteredSmallBusiness[]>(() => readRegisteredSmallBusinesses());
   const [savingGenerated, setSavingGenerated] = useState(false);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
+  const [showAiChat, setShowAiChat] = useState(false);
   const load = useCallback(async () => { setLoading(true); setLoadError(null); try { if (user) setPlans(await getTripPlans(db, user.uid)); } catch { setLoadError("Trip plans could not be loaded."); } finally { setLoading(false); } }, [db, user]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -2563,6 +2571,28 @@ function Planner({ onOpenMap }: { onOpenMap: (planId: string) => void }) {
     }
   }
 
+  async function saveChatItinerary(itinerary: ItineraryDay[], promptText: string) {
+    if (savingGenerated) return;
+    setSavingGenerated(true);
+    const dayCount = itinerary.length;
+    try {
+      if (!user) throw new Error("Your session has expired.");
+      const title = promptText.trim() ? promptText.trim().slice(0, 48) : `${dayCount}-day Albay adventure`;
+      const planId = await createTripPlan(db, user.uid, title, {
+        durationHours: dayCount * 10,
+        budget: 3000 * dayCount,
+        transportation: "AI chat \u2022 Customized local transport",
+        interests: ["AI chat"],
+        walkingAbility: "Moderate walking",
+      }, itinerary);
+      setSuccess("Your chat itinerary is saved.");
+      await load();
+      onOpenMap(planId);
+    } catch {
+      setMessages((c) => [...c, { id: Date.now(), role: "guide", text: "I couldn\u2019t save that chat itinerary. Please try again." }]);
+    } finally { setSavingGenerated(false); }
+  }
+
   function excludeGeneratedPlace(title: string) {
     const excludedPlaces = [...(answers.excludedPlaces ?? []), title];
     const nextAnswers = { ...answers, excludedPlaces };
@@ -2628,12 +2658,41 @@ function Planner({ onOpenMap }: { onOpenMap: (planId: string) => void }) {
           <button onClick={() => setSuccess(null)} style={{ color: "var(--c-green)", cursor: "pointer", background: "none", border: "none" }}>Dismiss</button>
         </Card>
       )}
+      <div className="card" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ width: 36, height: 36, borderRadius: 12, background: "var(--c-green)", display: "flex", alignItems: "center", justifyContent: "center" }}><span className="material-symbols-outlined" style={{ fontSize: 18, color: "white" }}>auto_awesome</span></span>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <strong style={{ fontSize: 13 }}>Chat with Hilinga AI</strong>
+              <span style={{ fontSize: 11, color: "var(--c-muted)" }}>DB-grounded \u2022 keeps history \u2022 refine in thread</span>
+            </div>
+          </div>
+          <button onClick={() => setShowAiChat((v) => !v)} style={{ padding: "8px 12px", borderRadius: 999, background: showAiChat ? "var(--c-green)" : "white", color: showAiChat ? "white" : "var(--c-ink)", border: "1px solid var(--c-line)", fontWeight: 800, fontSize: 12 }}>{showAiChat ? "Hide chat" : "Open chat"}</button>
+        </div>
+        {showAiChat ? (
+          <ItineraryChatPanel
+            selectedDays={Number(answers.days) || 2}
+            selectedPace={(answers.pace as any) || "Balanced"}
+            selectedBudget={(["Budget","Moderate","Premium"].includes(answers.budget ?? "") ? (answers.budget as any) : "Moderate")}
+            onSaveItinerary={saveChatItinerary}
+            saving={savingGenerated}
+          />
+        ) : (
+          <p style={{ fontSize: 12, lineHeight: "18px", color: "var(--c-body)", margin: 0 }}>Describe your trip in natural language — the AI will use <strong>only</strong> places from the Explore catalog + registered small businesses. Try: “3-day ATV + spicy food near Legazpi, moderate budget, packed pace”.</p>
+        )}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <Tooltip content="Use local planner without AI"><button onClick={() => { setShowAiChat(false); openChat(); }} style={{ padding: "6px 10px", borderRadius: 999, background: "var(--c-chip)", fontSize: 11, fontWeight: 800 }}>Guided planner</button></Tooltip>
+          <span style={{ fontSize: 11, color: "var(--c-muted)", alignSelf: "center" }}>or keep your current questionnaire flow</span>
+        </div>
+        {!showAiChat && generatingItinerary && <div className="prompt-status-banner"><span className="prompt-status-spinner" /><span>Generating itinerary…</span></div>}
+      </div>
+
       <div className="planner-section-heading">
         <div><span className="eyebrow">Your collection</span><h2 className="section-title">Saved trips</h2></div>
         {plans.length > 0 && <button className="planner-new-link" onClick={openChat}><Icon name="add" size={18} /> New trip</button>}
       </div>
       {loading ? (
-        <div style={{ display: "flex", justifyContent: "center", padding: 20 }}><div className="spinner" /></div>
+        <SkeletonPlanner />
       ) : loadError ? (
         <EmptyState icon="warning" title="Plans unavailable" message={loadError} action="Try again" onAction={load} />
       ) : plans.length === 0 ? (
@@ -2656,9 +2715,9 @@ function Planner({ onOpenMap }: { onOpenMap: (planId: string) => void }) {
                     </span>
                   </div>
                 </div>
-                <button aria-label={`Delete ${plan.title}`} onClick={() => setDeleteTarget(plan)} style={{ padding: 8, background: "none", border: "none", cursor: "pointer" }}>
+                <Tooltip content={`Delete ${plan.title}`}><button aria-label={`Delete ${plan.title}`} onClick={() => setDeleteTarget(plan)} style={{ padding: 8, background: "none", border: "none", cursor: "pointer" }}>
                   <Icon name="delete" size={21} color="var(--c-red)" />
-                </button>
+                </button></Tooltip>
               </div>
               <div className="planner-plan-meta">
                 <span><Icon name="directions_car" size={16} />{plan.preferences.transportation}</span>
@@ -2878,7 +2937,7 @@ function Saved({ goExplore, onBack }: { goExplore: () => void; onBack?: () => vo
         ))}
       </div>
       {loading ? (
-        <div style={{ display: "flex", justifyContent: "center", padding: 20 }}><div className="spinner" /></div>
+        <SkeletonSaved />
       ) : error ? (
         <EmptyState icon="warning" title="Saved items unavailable" message={error} action="Try again" onAction={load} />
       ) : shown.length === 0 ? (
@@ -3065,13 +3124,13 @@ function ProfileScreen({ goPlanner, goExplore, onReset, businessMode }: { goPlan
     <div className="screen profile-screen">
       <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="file-input-hidden" />
       <ScreenHeader title={businessMode ? "Business profile" : "Profile"} subtitle={businessMode ? "Manage how your business appears on Hilinga." : "Your travel preferences, all in one place."} action={
-        <button className="profile-edit-button" onClick={edit} aria-label="Edit profile">
+        <Tooltip content="Edit your profile"><button className="profile-edit-button" onClick={edit} aria-label="Edit profile">
           <Icon name="edit" size={18} />
           <span>Edit</span>
-        </button>
+        </button></Tooltip>
       } />
       {loading ? (
-        <div style={{ display: "flex", justifyContent: "center", padding: 20 }}><div className="spinner" /></div>
+        <SkeletonProfile />
       ) : (
         <>
           {success && (
@@ -3134,6 +3193,13 @@ function ProfileScreen({ goPlanner, goExplore, onReset, businessMode }: { goPlan
           </div>
 
           {!businessMode && <ProfileQrCard />}
+
+          {businessMode && (
+            <section className="profile-section">
+              <div className="profile-section-heading"><div><span>Business</span><h3>Registered business</h3></div></div>
+              <BusinessRegistrationDashboard />
+            </section>
+          )}
 
           <section className="profile-section">
             <div className="profile-section-heading">

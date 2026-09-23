@@ -7,6 +7,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -156,63 +157,113 @@ export function AuthProvider({ children }: PropsWithChildren) {
     void refreshProfile();
   }, [refreshProfile]);
 
+  // Debounce timer refs for profile saves to prevent race conditions
+  const persistTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Cleanup: cancel any pending profile saves on unmount
+  useEffect(() => {
+    return () => {
+      if (persistTimeoutRef.current) {
+        clearTimeout(persistTimeoutRef.current);
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
   const persistProfile = useCallback(
     async (input: OnboardingProfile) => {
       const userId = user?.uid;
       if (!userId) throw new Error("Your session has expired. Please sign in again.");
 
-      const startedAt = performance.now();
-      console.info("[profile] save started", { hasAvatarUpload: Boolean(input.avatarSelection) });
-      try {
-        let avatarPath = input.avatarPath ?? profile?.avatar_path ?? null;
-        let localAvatarUrl = input.avatarSelection?.uri ?? user.photoURL ?? avatarUrl;
-        if (input.avatarSelection && isFirebaseStorageEnabled) {
-          try {
-            avatarPath = await uploadAvatar(userId, input.avatarSelection);
-          } catch (avatarError) {
-            console.warn("[profile] photo upload unavailable; saving profile without it", avatarError);
-          }
-        } else if (input.avatarSelection) {
-          console.info("[profile] cloud photo upload skipped because Firebase Storage is disabled");
-        }
-
-        const saved = await saveCloudProfile({
-          id: userId,
-          account_mode: resolveAccountMode(userId, profile?.account_mode),
-          display_name: input.display_name.trim(),
-          avatar_path: avatarPath,
-          interests: input.interests,
-          language: input.language,
-          budget_min: input.budget_min,
-          budget_max: input.budget_max,
-          notifications_enabled: input.notifications_enabled,
-          onboarding_completed: input.onboarding_completed,
-        }, profile);
-        setProfile(saved);
-        setError(null);
-
-        if (saved.avatar_path && isFirebaseStorageEnabled) {
-          try {
-            localAvatarUrl = await getAvatarUrl(saved.avatar_path);
-          } catch (avatarError) {
-            console.warn("[profile] photo URL unavailable", avatarError);
-          }
-        }
-        setAvatarUrl(localAvatarUrl ?? null);
-        if (resolveAccountMode(userId, saved.account_mode) !== "business") {
-          void ensureTouristPassport(userId, saved.display_name, localAvatarUrl ?? "", {
-            language: saved.language,
-            interests: saved.interests,
-          })
-            .catch((profileQrError) => console.warn("[profile-qr] Could not initialize the Profile QR:", profileQrError));
-        }
-        console.info("[profile] save completed", { durationMs: Math.round(performance.now() - startedAt) });
-      } catch (nextError) {
-        console.error("[profile] save failed", nextError);
-        throw nextError;
+      // Cancel any pending save and abort in-flight requests
+      if (persistTimeoutRef.current) {
+        clearTimeout(persistTimeoutRef.current);
       }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
+      // Create new abort controller for this save
+      abortControllerRef.current = new AbortController();
+
+      return new Promise<void>((resolve, reject) => {
+        // Debounce profile saves by 300ms to batch rapid updates
+        persistTimeoutRef.current = setTimeout(async () => {
+          const startedAt = performance.now();
+          console.info("[profile] save started", { hasAvatarUpload: Boolean(input.avatarSelection) });
+          try {
+            let avatarPath = input.avatarPath ?? profile?.avatar_path ?? null;
+            let localAvatarUrl = input.avatarSelection?.uri ?? user.photoURL ?? avatarUrl;
+            if (input.avatarSelection && isFirebaseStorageEnabled) {
+              try {
+                avatarPath = await uploadAvatar(userId, input.avatarSelection);
+              } catch (avatarError) {
+                console.warn("[profile] photo upload unavailable; saving profile without it", avatarError);
+              }
+            } else if (input.avatarSelection) {
+              console.info("[profile] cloud photo upload skipped because Firebase Storage is disabled");
+            }
+
+            // Check if this save was cancelled
+            if (abortControllerRef.current?.signal.aborted) {
+              reject(new Error("Profile save was cancelled"));
+              return;
+            }
+
+            const saved = await saveCloudProfile({
+              id: userId,
+              account_mode: resolveAccountMode(userId, profile?.account_mode),
+              display_name: input.display_name.trim(),
+              avatar_path: avatarPath,
+              interests: input.interests,
+              language: input.language,
+              budget_min: input.budget_min,
+              budget_max: input.budget_max,
+              notifications_enabled: input.notifications_enabled,
+              onboarding_completed: input.onboarding_completed,
+            }, profile);
+
+            // Check again before updating state
+            if (abortControllerRef.current?.signal.aborted) {
+              reject(new Error("Profile save was cancelled"));
+              return;
+            }
+
+            setProfile(saved);
+            setError(null);
+
+            if (saved.avatar_path && isFirebaseStorageEnabled) {
+              try {
+                localAvatarUrl = await getAvatarUrl(saved.avatar_path);
+              } catch (avatarError) {
+                console.warn("[profile] photo URL unavailable", avatarError);
+              }
+            }
+            setAvatarUrl(localAvatarUrl ?? null);
+            if (resolveAccountMode(userId, saved.account_mode) !== "business") {
+              void ensureTouristPassport(userId, saved.display_name, localAvatarUrl ?? "", {
+                language: saved.language,
+                interests: saved.interests,
+              })
+                .catch((profileQrError) => console.warn("[profile-qr] Could not initialize the Profile QR:", profileQrError));
+            }
+            console.info("[profile] save completed", { durationMs: Math.round(performance.now() - startedAt) });
+            resolve();
+          } catch (nextError) {
+            // Don't report errors from cancelled saves
+            if (!(abortControllerRef.current?.signal.aborted)) {
+              console.error("[profile] save failed", nextError);
+              setError(errorMessage(nextError));
+              reject(nextError);
+            }
+          }
+        }, 300);
+      });
     },
-    [avatarUrl, profile, user],
+    [avatarUrl, profile, user?.uid, user?.photoURL],
   );
 
   const completeOnboarding = useCallback(
