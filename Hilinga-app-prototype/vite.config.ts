@@ -68,7 +68,7 @@ function enforceAllowlist(itinerary: Array<{day:number;title:string;stops:Array<
   if(repairedCount>0 && dropped===0) warnings.push(`${repairedCount} stop title(s) were normalized to match the database exactly.`);
   return {repaired,warnings,dropped,repairedCount};
 }
-function cleanText(v: unknown, max:number): string { return typeof v==="string"?v.trim().slice(0,max):""; }
+function cleanText(v: unknown, max:number): string { if(typeof v!=="string") return ""; return (v as string).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0,max); }
 function sanitizeBusinesses(v: unknown): Array<{name:string;category:string;location:string;hours:string;about:string}> {
   if(!Array.isArray(v)) return [];
   return (v as unknown[]).slice(0,25).map((b)=>{ const c=(b && typeof b==="object"?b:{} as Record<string,unknown>) as Record<string,unknown>; return { name: cleanText(c["name"],120), category: cleanText(c["category"],80), location: cleanText(c["location"],160), hours: cleanText(c["hours"],160), about: cleanText(c["about"],500)}; }).filter(b=>b.name && b.category && b.location);

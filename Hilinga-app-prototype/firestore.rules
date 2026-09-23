@@ -5,10 +5,20 @@ service cloud.firestore {
     function isOwner(userId) {
       return request.auth != null && request.auth.uid == userId;
     }
+    function isVerified() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function isVerifiedOwner(userId) {
+      return isVerified() && request.auth.uid == userId;
+    }
+    // Verified owner check — use for all writes to prevent unverified account abuse
+    function isVerifiedOwnerStrict(userId) {
+      return isVerifiedOwner(userId);
+    }
 
     match /profiles/{userId} {
       allow read, delete: if isOwner(userId);
-      allow create, update: if isOwner(userId)
+      allow create, update: if isVerifiedOwnerStrict(userId)
         && request.resource.data.id == userId
         && (!('account_mode' in request.resource.data)
           || request.resource.data.account_mode in ['explore', 'business']);
@@ -16,7 +26,7 @@ service cloud.firestore {
 
     match /businesses/{userId} {
       allow read: if request.auth != null;
-      allow create, update: if isOwner(userId)
+      allow create, update: if isVerifiedOwnerStrict(userId)
         && request.resource.data.keys().hasOnly([
           'ownerUid', 'name', 'businessScale', 'category', 'location',
           'phone', 'email', 'hours', 'about', 'coverUrl', 'logoUrl',
@@ -53,18 +63,18 @@ service cloud.firestore {
         && request.resource.data.longitude <= 180
         && request.resource.data.createdAt is string
         && request.resource.data.updatedAt is string;
-      allow delete: if isOwner(userId);
+      allow delete: if isVerifiedOwnerStrict(userId);
     }
 
     function isBusinessAccount() {
-      return request.auth != null
+      return isVerified()
         && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.account_mode == 'business';
     }
 
     match /touristProfiles/{touristId} {
       allow get: if isOwner(touristId) || isBusinessAccount();
       allow list: if false;
-      allow create, update: if isOwner(touristId)
+      allow create, update: if isVerifiedOwnerStrict(touristId)
         && request.resource.data.ownerUid == touristId
         && request.resource.data.keys().hasOnly([
           'ownerUid', 'touristCode', 'firstName', 'lastName', 'profilePhoto',
@@ -92,16 +102,16 @@ service cloud.firestore {
     }
 
     match /touristQrCodes/{token} {
-      allow get: if request.auth != null
+      allow get: if isVerified()
         && (isBusinessAccount() || resource.data.ownerUid == request.auth.uid);
       allow list: if false;
-      allow create: if request.auth != null
+      allow create: if isVerified()
         && request.resource.data.ownerUid == request.auth.uid
         && request.resource.data.keys().hasOnly(['ownerUid', 'status', 'createdAt', 'updatedAt'])
         && request.resource.data.status in ['active', 'disabled', 'revoked']
         && request.resource.data.createdAt is string
         && request.resource.data.updatedAt is string;
-      allow update: if request.auth != null
+      allow update: if isVerified()
         && resource.data.ownerUid == request.auth.uid
         && request.resource.data.ownerUid == resource.data.ownerUid
         && request.resource.data.keys().hasOnly(['ownerUid', 'status', 'createdAt', 'updatedAt'])
@@ -112,7 +122,7 @@ service cloud.firestore {
     }
 
     match /touristVisitLogs/{visitId} {
-      allow read: if request.auth != null
+      allow read: if isVerified()
         && (resource.data.businessId == request.auth.uid || resource.data.touristId == request.auth.uid);
       allow create: if isBusinessAccount()
         && request.resource.data.businessId == request.auth.uid
@@ -166,7 +176,7 @@ service cloud.firestore {
 
     match /users/{userId}/savedPlaces/{placeId} {
       allow read, delete: if isOwner(userId);
-      allow create, update: if isOwner(userId)
+      allow create, update: if isVerifiedOwnerStrict(userId)
         && request.resource.data.keys().hasOnly([
           'title', 'subtitle', 'kind', 'imageKey', 'createdAt'
         ])
@@ -185,7 +195,7 @@ service cloud.firestore {
 
     match /users/{userId}/tripPlans/{planId} {
       allow read, delete: if isOwner(userId);
-      allow create, update: if isOwner(userId)
+      allow create, update: if isVerifiedOwnerStrict(userId)
         && request.resource.data.keys().hasOnly([
           'title', 'preferences', 'itinerary', 'createdAt'
         ])
@@ -211,7 +221,7 @@ service cloud.firestore {
 
     match /communityPosts/{postId} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null
+      allow create: if isVerified()
         && request.resource.data.keys().hasOnly([
           'authorUid', 'authorName', 'authorAvatarUrl', 'placeName',
           'location', 'category', 'experience', 'rating', 'createdAt'
@@ -240,13 +250,13 @@ service cloud.firestore {
             && request.resource.data.rating <= 5))
         && request.resource.data.createdAt == request.time;
       allow update: if false;
-      allow delete: if request.auth != null
+      allow delete: if isVerified()
         && resource.data.authorUid == request.auth.uid;
     }
 
     match /businessPosts/{postId} {
       allow read: if request.auth != null;
-      allow create: if request.auth != null
+      allow create: if isVerified()
         && request.resource.data.keys().hasAll([
           'ownerUid', 'sourceId', 'businessId', 'businessName',
           'businessCategory', 'businessLocation', 'businessLogoUrl',
@@ -288,14 +298,14 @@ service cloud.firestore {
         && request.resource.data.mediaType == 'image'
         && request.resource.data.createdAt is string;
       allow update: if false;
-      allow delete: if request.auth != null
+      allow delete: if isVerified()
         && resource.data.ownerUid == request.auth.uid;
     }
 
     match /businessPostLikes/{likeId} {
-      allow read: if request.auth != null
+      allow read: if isVerified()
         && resource.data.userId == request.auth.uid;
-      allow create: if request.auth != null
+      allow create: if isVerified()
         && request.resource.data.keys().hasOnly(['postId', 'userId', 'createdAt'])
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.postId is string
@@ -303,21 +313,21 @@ service cloud.firestore {
         && request.resource.data.postId.size() <= 160
         && likeId == request.resource.data.postId + '_' + request.auth.uid
         && request.resource.data.createdAt == request.time;
-      allow update: if request.auth != null
+      allow update: if isVerified()
         && resource.data.userId == request.auth.uid
         && request.resource.data.keys().hasOnly(['postId', 'userId', 'createdAt'])
         && request.resource.data.postId == resource.data.postId
         && request.resource.data.userId == resource.data.userId
         && request.resource.data.createdAt == request.time;
-      allow delete: if request.auth != null
+      allow delete: if isVerified()
         && resource.data.userId == request.auth.uid;
     }
 
     match /businessInquiries/{inquiryId} {
-      allow read: if request.auth != null
+      allow read: if isVerified()
         && (resource.data.businessId == request.auth.uid
           || resource.data.senderUid == request.auth.uid);
-      allow create: if request.auth != null
+      allow create: if isVerified()
         && request.resource.data.keys().hasOnly([
           'businessId', 'businessName', 'senderUid', 'senderName',
           'senderEmail', 'message', 'status', 'createdAt', 'updatedAt'
@@ -339,20 +349,20 @@ service cloud.firestore {
         && request.resource.data.status == 'unread'
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time;
-      allow update: if request.auth != null
+      allow update: if isVerified()
         && resource.data.businessId == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
         && request.resource.data.status in ['unread', 'read']
         && request.resource.data.updatedAt == request.time;
-      allow delete: if request.auth != null
+      allow delete: if isVerified()
         && (resource.data.businessId == request.auth.uid
           || resource.data.senderUid == request.auth.uid);
     }
 
     match /businessProfileViews/{viewId} {
-      allow read: if request.auth != null
+      allow read: if isVerified()
         && resource.data.businessId == request.auth.uid;
-      allow create: if request.auth != null
+      allow create: if isVerified()
         && request.resource.data.keys().hasOnly([
           'businessId', 'businessName', 'viewerUid', 'viewedAt'
         ])
@@ -363,7 +373,7 @@ service cloud.firestore {
           == get(/databases/$(database)/documents/businesses/$(request.resource.data.businessId)).data.name
         && viewId == request.resource.data.businessId + '_' + request.auth.uid
         && request.resource.data.viewedAt == request.time;
-      allow update: if request.auth != null
+      allow update: if isVerified()
         && resource.data.viewerUid == request.auth.uid
         && request.resource.data.businessId == resource.data.businessId
         && request.resource.data.businessName == resource.data.businessName

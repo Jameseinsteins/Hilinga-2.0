@@ -132,7 +132,9 @@ export function buildSystemPrompt(opts: {
 }
 
 export function cleanText(value: unknown, maxLength: number): string {
-  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+  if (typeof value !== "string") return "";
+  // Strip HTML tags to prevent prompt injection / stored XSS if ever rendered as HTML
+  return value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, maxLength);
 }
 
 export function sanitizeBusinesses(value: unknown): BusinessForPrompt[] {

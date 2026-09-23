@@ -58,6 +58,7 @@ import {
 import { useAuth } from "@/providers/auth-provider";
 import { useDatabase } from "@/providers/database-provider";
 import { ProfileQrCard } from "@/components/tourist-passport";
+import { AccountSecurityCard } from "@/components/account-security-card";
 
 import explore1 from "@/assets/images/hilinga/explore-1.png";
 import explore2 from "@/assets/images/hilinga/explore-2.png";
@@ -3232,12 +3233,9 @@ function ProfileScreen({ goPlanner, goExplore, onReset, businessMode }: { goPlan
 
           <section className="profile-section profile-account-section">
             <div className="profile-section-heading"><div><span>Account</span><h3>Privacy & access</h3></div></div>
-            <Card className="profile-settings-card">
-              <div className="profile-account-email">
-                <span className="profile-setting-icon"><Icon name="lock" size={21} color="var(--c-green)" /></span>
-                <span className="profile-setting-copy"><span className="profile-setting-label">Signed in securely</span><span className="profile-setting-value">{user?.email ?? "Firebase account"}</span></span>
-                <Icon name="verified_user" size={20} color="var(--c-green)" />
-              </div>
+            <Card className="profile-settings-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {user?.uid && <AccountSecurityCard uid={user.uid} email={user.email ?? ""} emailVerified={Boolean(user.emailVerified)} />}
+              <div style={{ height: 1, background: "#EEE" }} />
               <button className="profile-account-action" onClick={() => void signOut().catch((e) => setError(e instanceof Error ? e.message : "Sign out failed."))}>
                 <Icon name="logout" size={20} /><span>Sign out</span>
               </button>
