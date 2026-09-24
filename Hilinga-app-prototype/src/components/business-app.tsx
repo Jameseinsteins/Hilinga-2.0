@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/providers/auth-provider";
 import { AccountSecurityCard } from "@/components/account-security-card";
 import { BusinessVisitors } from "@/components/business-visitors";
+import { KeepAliveTab, ViewCacheProvider, useViewCache } from "@/hooks/useViewCache";
 import { BusinessAnalytics } from "@/components/business-analytics";
 import {
   BUSINESS_CONTENT_CHANGED_EVENT,
@@ -85,11 +86,22 @@ function resizeImage(file: File, maxSide = 900, quality = 0.68) {
 }
 
 export function BusinessApp() {
+  return (
+    <ViewCacheProvider initial="home">
+      <BusinessAppShell />
+    </ViewCacheProvider>
+  );
+}
+
+function BusinessAppShell() {
   const { profile, user, avatarUrl, signOut } = useAuth();
-  const [tab, setTab] = useState<BusinessTab>(() => {
+  const { activeTab, setActiveTab, visited } = useViewCache();
+  const tab = (activeTab as BusinessTab);
+  const setTab = setActiveTab as (t: BusinessTab) => void;
+  useEffect(() => {
     const route = window.location.hash.replace("#business/", "") as BusinessTab;
-    return tabs.some((item) => item.id === route && route !== "create") ? route : "home";
-  });
+    if (tabs.some((item) => item.id === route && route !== "create")) setTab(route);
+  }, [setTab]);
   const [createOpen, setCreateOpen] = useState(false);
   const [category, setCategory] = useState<BusinessPostCategory>("Photos & Videos");
   const [title, setTitle] = useState("");
@@ -331,14 +343,17 @@ export function BusinessApp() {
   return (
     <div className="business-app-shell">
       <main className="business-app-content">
-        {tab === "home" && <div className="business-screen">
+        <KeepAliveTab tab="home" active={tab} visited={visited as unknown as Set<BusinessTab>}>
+          <div className="business-screen">
           <header className="business-topbar"><div><span className="business-overline">HILINGA BUSINESS</span><h1>Good day, {firstName}</h1><p>{today}</p></div><div className="business-topbar-actions"><button className="business-alert-button" onClick={() => navigate("inbox")} aria-label={`${unreadInquiryCount} unread inquiries`}><Icon name="inbox" size={22} />{unreadInquiryCount > 0 && <em>{Math.min(99, unreadInquiryCount)}</em>}</button><button className="business-alert-button" aria-label="Notifications"><Icon name="notifications" size={22} /></button></div></header>
           <section className="business-welcome-card"><span className="business-welcome-icon"><Icon name="storefront" size={27} /></span><div><span>BUSINESS OVERVIEW</span><h2>{businessName}</h2><p>{unreadInquiryCount ? `You have ${unreadInquiryCount} new traveler ${unreadInquiryCount === 1 ? "inquiry" : "inquiries"} waiting in your inbox.` : "Your public page, posts, visitor log, and customer messages are connected."}</p></div><button onClick={() => unreadInquiryCount ? navigate("inbox") : navigate("my-business")}>{unreadInquiryCount ? "Open inbox" : "Manage"} <Icon name="arrow_forward" size={17} /></button></section>
           <section><div className="business-section-heading"><div><span>LIVE</span><h2>At a glance</h2></div></div><div className="business-stats"><article><Icon name="visibility" /><strong>{profileViewCount}</strong><span>Unique profile viewers</span></article><article><Icon name="forum" /><strong>{inquiries.length}</strong><span>Customer inquiries</span></article><article><Icon name="inventory_2" /><strong>{items.length}</strong><span>Published items</span></article></div></section>
           <section><div className="business-section-heading"><div><span>NEXT STEPS</span><h2>Grow your presence</h2></div></div><div className="business-task-list"><button onClick={() => navigate("my-business")}><span><Icon name="domain_add" /></span><div><strong>Complete your business details</strong><p>Add your location, hours, and contact information.</p></div><Icon name="chevron_right" /></button><button onClick={() => setCreateOpen(true)}><span><Icon name="add_circle" /></span><div><strong>Create your first offering</strong><p>Publish a listing, product, service, or promotion.</p></div><Icon name="chevron_right" /></button></div></section>
-        </div>}
+        </div>
+        </KeepAliveTab>
 
-        {tab === "my-business" && <div className="business-page-screen">
+        <KeepAliveTab tab="my-business" active={tab} visited={visited as unknown as Set<BusinessTab>}>
+          <div className="business-page-screen">
           <section className="business-social-page">
             <div className={`business-cover ${pageInfo.coverUrl ? "has-image" : ""}`} style={pageInfo.coverUrl ? { backgroundImage: `url(${pageInfo.coverUrl})` } : undefined}>
               {!pageInfo.coverUrl && <div><Icon name="landscape" size={34} /><span>Add a cover photo</span></div>}
@@ -372,15 +387,24 @@ export function BusinessApp() {
               return <article key={item.id} className={`business-category-${postCategory.toLowerCase().replace(/[^a-z]+/g, "-")}`}><header><div className="business-post-avatar">{pageInfo.logoUrl ? <img src={pageInfo.logoUrl} alt="" /> : <Icon name="storefront" size={20} />}</div><div><strong>{businessName} <span className="business-inline-verified"><Icon name="verified" size={15} /></span></strong><small>{new Date(item.createdAt).toLocaleDateString("en-PH", { month: "long", day: "numeric" })}</small></div><span className="business-post-category"><Icon name={postCategory === "Events" ? "event" : postCategory === "Promotions" ? "campaign" : "perm_media"} size={14} />{postCategory}</span></header><h3>{item.title}</h3>{item.detail && <p>{item.detail}</p>}{postCategory === "Events" && <div className="business-post-detail"><Icon name="event" size={18} /><div><strong>{item.eventDate ? new Date(`${item.eventDate}T00:00:00`).toLocaleDateString("en-PH", { weekday: "short", month: "long", day: "numeric", year: "numeric" }) : "Date to be announced"}</strong><span><Icon name="location_on" size={14} />{item.eventLocation || "Location to be announced"}</span></div></div>}{postCategory === "Promotions" && <div className="business-post-detail business-promo-detail"><Icon name="local_offer" size={18} /><div><strong>{item.promotionOffer || "Special promotion"}</strong><span>{item.promotionEnds ? `Available until ${new Date(`${item.promotionEnds}T00:00:00`).toLocaleDateString("en-PH", { month: "long", day: "numeric", year: "numeric" })}` : "Limited-time offer"}</span></div></div>}{postMedia && (item.mediaType === "video" ? <video src={postMedia} className="business-post-image" controls playsInline /> : <img src={postMedia} alt={item.title} className="business-post-image" />)}<footer><button><Icon name="thumb_up" size={18} /> Like</button><button><Icon name="chat_bubble" size={18} /> Comment</button><button><Icon name="share" size={18} /> Share</button></footer></article>;
             })}</div>}</section>
           </div>
-        </div>}
+        </div>
+        </KeepAliveTab>
 
-        {tab === "visitors" && <BusinessVisitors businessName={businessName} businessLocation={pageInfo.location} initialQrValue={initialProfileQr} />}
+        <KeepAliveTab tab="visitors" active={tab} visited={visited as unknown as Set<BusinessTab>}>
+          <BusinessVisitors businessName={businessName} businessLocation={pageInfo.location} initialQrValue={initialProfileQr} />
+        </KeepAliveTab>
 
-        {tab === "analytics" && <BusinessAnalytics businessName={businessName} businessId={user?.uid || ""} />}
+        <KeepAliveTab tab="analytics" active={tab} visited={visited as unknown as Set<BusinessTab>}>
+          <BusinessAnalytics businessName={businessName} businessId={user?.uid || ""} />
+        </KeepAliveTab>
 
-        {tab === "inbox" && <BusinessInbox inquiries={inquiries} error={inquiryError} onStatusChange={changeInquiryStatus} />}
+        <KeepAliveTab tab="inbox" active={tab} visited={visited as unknown as Set<BusinessTab>}>
+          <BusinessInbox inquiries={inquiries} error={inquiryError} onStatusChange={changeInquiryStatus} />
+        </KeepAliveTab>
 
-        {tab === "profile" && <div className="business-screen"><header className="business-page-header"><span>ACCOUNT</span><h1>Business Profile</h1><p>Manage your business account settings and access.</p></header><section className="business-account-card"><div className="business-profile-avatar">{avatarUrl ? <img src={avatarUrl} alt="" /> : businessName.charAt(0).toUpperCase()}</div><div><strong>{businessName}</strong><span>{user?.email ?? "Signed in"}</span><small><Icon name="verified_user" size={14} /> Secure account</small></div></section><section className="business-settings-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>{user?.uid && <div style={{ padding: "10px 12px", background: "white", borderRadius: 12, border: "1px solid #E6E6E6" }}><div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 0.6, color: "var(--c-green)", marginBottom: 8 }}>PRIVACY & ACCESS</div><AccountSecurityCard uid={user.uid} email={user.email ?? ""} emailVerified={Boolean(user.emailVerified)} /></div>}<button><Icon name="badge" /><span><strong>Account information</strong><small>Business identity and contact details</small></span><Icon name="chevron_right" /></button><button><Icon name="notifications" /><span><strong>Notification settings</strong><small>Inquiries, updates, and promotions</small></span><Icon name="chevron_right" /></button><button className="business-logout" onClick={() => void signOut()}><Icon name="logout" /><span><strong>Sign out</strong><small>Return to account selection</small></span></button></section></div>}
+        <KeepAliveTab tab="profile" active={tab} visited={visited as unknown as Set<BusinessTab>}>
+          <div className="business-screen"><header className="business-page-header"><span>ACCOUNT</span><h1>Business Profile</h1><p>Manage your business account settings and access.</p></header><section className="business-account-card"><div className="business-profile-avatar">{avatarUrl ? <img src={avatarUrl} alt="" /> : businessName.charAt(0).toUpperCase()}</div><div><strong>{businessName}</strong><span>{user?.email ?? "Signed in"}</span><small><Icon name="verified_user" size={14} /> Secure account</small></div></section><section className="business-settings-card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>{user?.uid && <div style={{ padding: "10px 12px", background: "white", borderRadius: 12, border: "1px solid #E6E6E6" }}><div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 0.6, color: "var(--c-green)", marginBottom: 8 }}>PRIVACY & ACCESS</div><AccountSecurityCard uid={user.uid} email={user.email ?? ""} emailVerified={Boolean(user.emailVerified)} /></div>}<button><Icon name="badge" /><span><strong>Account information</strong><small>Business identity and contact details</small></span><Icon name="chevron_right" /></button><button><Icon name="notifications" /><span><strong>Notification settings</strong><small>Inquiries, updates, and promotions</small></span><Icon name="chevron_right" /></button><button className="business-logout" onClick={() => void signOut()}><Icon name="logout" /><span><strong>Sign out</strong><small>Return to account selection</small></span></button></section></div>
+        </KeepAliveTab>
       </main>
 
       <nav className="business-tab-dock" aria-label="Business navigation"><div role="tablist">{tabs.map((item) => item.id === "create" ? <button key={item.id} className="business-create-tab" onClick={() => navigate(item.id)} aria-label="Create new business content"><span><Icon name="add" size={32} /></span><small>CREATE</small></button> : <button key={item.id} className={`business-tab ${tab === item.id ? "selected" : ""}`} onClick={() => navigate(item.id)} role="tab" aria-selected={tab === item.id}><Icon name={item.icon} size={22} />{item.id === "inbox" && unreadInquiryCount > 0 && <em>{Math.min(99, unreadInquiryCount)}</em>}<span>{item.label}</span></button>)}</div></nav>

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 
-type TabKey = "Home" | "Explore" | "Planner" | "Feed" | "Profile";
+export type TabKey = string;
 
 type ViewCacheCtx = {
   activeTab: TabKey;
@@ -11,7 +11,7 @@ type ViewCacheCtx = {
 
 const Ctx = createContext<ViewCacheCtx | null>(null);
 
-export function ViewCacheProvider({ children, initial = "Home" as TabKey }: { children: ReactNode; initial?: TabKey }) {
+export function ViewCacheProvider({ children, initial = "Home" }: { children: ReactNode; initial?: TabKey }) {
   const [activeTab, setActiveTabRaw] = useState<TabKey>(initial);
   const [visited, setVisited] = useState<Set<TabKey>>(() => new Set([initial]));
   const setActiveTab = useCallback((t: TabKey) => {

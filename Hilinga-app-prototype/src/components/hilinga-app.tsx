@@ -2,6 +2,7 @@ import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "re
 
 import { MapPlace, MapRouteStop, MapTerminal, OpenStreetMap } from "@/components/openstreet-map";
 import { BusinessRegistrationDashboard } from "@/components/business-registration-dashboard";
+import { KeepAliveTab, ViewCacheProvider, useViewCache } from "@/hooks/useViewCache";
 // NOTE: MapScreen and ExploreScreen need API fixes - temporarily disabled
 // import { MapScreen } from "@/components/screens/MapScreen";
 // import { ExploreScreen } from "@/components/screens/ExploreScreen";
@@ -45,8 +46,7 @@ import {
   CommunityPost,
   createCommunityPost,
   deleteCommunityPost,
-  ExperienceCategory,
-  experienceCategories,
+  type ExperienceCategory,
   subscribeToCommunityPosts,
 } from "@/lib/community-feed";
 import {
@@ -211,35 +211,6 @@ const savedImages: Record<string, string> = {
   highlands: explore5,
   market: explore6,
 };
-
-type BusinessProfile = {
-  name: string;
-  category: string;
-  location: string;
-  description: string;
-};
-
-type PromotedProduct = {
-  id: string;
-  name: string;
-  category: string;
-  price: string;
-  description: string;
-  createdAt: string;
-};
-
-const placeSuggestions = [
-  { id: "feed-cagsawa", name: "Cagsawa Ruins", description: "Walk through Albay's iconic history with a front-row view of Mayon.", category: "Heritage", location: "Daraga, Albay", imageKey: "cagsawa", source: explore1, kind: "Places", visits: 28400, featured: true },
-  { id: "feed-mayon", name: "Mayon Skyline", description: "Cool mountain air, sweeping viewpoints, and a memorable scenic drive.", category: "Nature", location: "Tabaco, Albay", imageKey: "mayon", source: explore2, kind: "Places", visits: 21900 },
-  { id: "feed-sumlang", name: "Sumlang Lake", description: "A relaxed lakeside stop for local food, crafts, and Mayon views.", category: "Nature", location: "Camalig, Albay", imageKey: "sumlang", source: explore3, kind: "Places", visits: 17600 },
-  { id: "feed-cafe", name: "Albay Coffee Trail", description: "Discover cozy local cafes serving Bicol-grown coffee and fresh pastries.", category: "Cafes", location: "Legazpi City", imageKey: "cafe", source: explore4, kind: "Businesses", visits: 12800, featured: true },
-  { id: "feed-highlands", name: "Legazpi Highlands", description: "Find quiet green trails and elevated viewpoints just outside the city.", category: "Nature", location: "Legazpi, Albay", imageKey: "highlands", source: explore5, kind: "Places", visits: 9400 },
-  { id: "feed-market", name: "Legazpi Local Market", description: "Taste street food, browse regional products, and meet local makers.", category: "Shopping", location: "Legazpi City", imageKey: "market", source: explore6, kind: "Businesses", visits: 15200 },
-  { id: "feed-bicol-food", name: "Bicolano Food Finds", description: "Try pinangat, laing, sili ice cream, and other proudly local favorites.", category: "Food", location: "Old Albay District", imageKey: "market", source: explore6, kind: "Businesses", visits: 11300 },
-  { id: "feed-restaurants", name: "Mayon-view Restaurants", description: "Plan a meal with regional dishes and an unforgettable volcano backdrop.", category: "Restaurants", location: "Legazpi Boulevard", imageKey: "cafe", source: explore4, kind: "Businesses", visits: 8900 },
-  { id: "feed-ibig-sayaw", name: "Ibalong Street Festival", description: "See colorful masks, dance performances, and stories inspired by the Ibalong epic.", category: "Heritage", location: "Legazpi City", imageKey: "market", source: explore6, kind: "Events", visits: 19800, detail: "Aug 22 · 4:00 PM" },
-  { id: "feed-night-market", name: "Legazpi Weekend Night Market", description: "Spend an evening with local food stalls, music, crafts, and homegrown finds.", category: "Food", location: "Peñaranda Park", imageKey: "cafe", source: explore4, kind: "Events", visits: 7600, detail: "Saturdays · 5:00 PM" },
-];
 
 const tabIcons: Record<Tab, string> = {
   Home: "home",
@@ -1307,338 +1278,7 @@ function Explore({ initialFilter, initialBusinessId, onFilterHandled, onBusiness
   );
 }
 
-/* Previous curated discovery feed retained temporarily for reference while the
-   new community thread rolls out.
-function FeedLegacy({ businessMode, businessProfile, products, onSaveBusinessProfile, onAddProduct, onRemoveProduct }: {
-  businessMode: boolean;
-  businessProfile: BusinessProfile | null;
-  products: PromotedProduct[];
-  onSaveBusinessProfile: (profile: BusinessProfile) => Promise<void>;
-  onAddProduct: (product: Omit<PromotedProduct, "id" | "createdAt">) => Promise<void>;
-  onRemoveProduct: (id: string) => Promise<void>;
-}) {
-  const db = useDatabase();
-  const { user } = useAuth();
-  const [category, setCategory] = useState<FeedCategory>("All");
-  const [kind, setKind] = useState<FeedKind>("All");
-  const [sort, setSort] = useState<FeedSort>("Recommended");
-  const [query, setQuery] = useState("");
-  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
-  const [pendingId, setPendingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [businessEditorOpen, setBusinessEditorOpen] = useState(false);
-  const [productEditorOpen, setProductEditorOpen] = useState(false);
-  const [businessDraft, setBusinessDraft] = useState<BusinessProfile>(businessProfile ?? { name: "", category: "", location: "", description: "" });
-  const [productDraft, setProductDraft] = useState({ name: "", category: "", price: "", description: "" });
-  const [businessSaving, setBusinessSaving] = useState(false);
 
-  const refresh = useCallback(async () => {
-    if (user) setSavedIds(await getSavedIds(db, user.uid));
-  }, [db, user]);
-  useEffect(() => { refresh().catch(() => setError("Saved ideas could not be loaded.")); }, [refresh]);
-
-  const visibleItems = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    const matches = feedItems.filter((item) =>
-      (kind === "All" || item.kind === kind)
-      && (category === "All" || item.category === category)
-      && `${item.name} ${item.description} ${item.location} ${item.category} ${item.kind}`.toLowerCase().includes(normalizedQuery),
-    );
-    return sort === "Most visited" ? [...matches].sort((a, b) => b.visits - a.visits) : matches;
-  }, [category, kind, query, sort]);
-
-  async function toggleSaved(item: (typeof feedItems)[number]) {
-    if (pendingId) return;
-    setPendingId(item.id);
-    setError(null);
-    try {
-      if (!user) throw new Error("Your session has expired.");
-      if (savedIds.has(item.id)) await removeSavedItem(db, user.uid, item.id);
-      else await saveItem(db, user.uid, { id: item.id, title: item.name, subtitle: item.location, kind: item.kind, imageKey: item.imageKey });
-      await refresh();
-    } catch {
-      setError("That idea could not be saved. Please try again.");
-    } finally {
-      setPendingId(null);
-    }
-  }
-
-  async function saveBusinessProfile() {
-    if (!businessDraft.name.trim() || !businessDraft.category.trim() || !businessDraft.location.trim()) {
-      setError("Add your business name, category, and location.");
-      return;
-    }
-    setBusinessSaving(true); setError(null);
-    try {
-      await onSaveBusinessProfile({ ...businessDraft, name: businessDraft.name.trim(), category: businessDraft.category.trim(), location: businessDraft.location.trim(), description: businessDraft.description.trim() });
-      setBusinessEditorOpen(false);
-    } catch { setError("Your business profile could not be saved."); } finally { setBusinessSaving(false); }
-  }
-
-  async function addProduct() {
-    if (!productDraft.name.trim() || !productDraft.category.trim()) {
-      setError("Add a product name and category.");
-      return;
-    }
-    setBusinessSaving(true); setError(null);
-    try {
-      await onAddProduct({ ...productDraft, name: productDraft.name.trim(), category: productDraft.category.trim(), price: productDraft.price.trim(), description: productDraft.description.trim() });
-      setProductDraft({ name: "", category: "", price: "", description: "" });
-      setProductEditorOpen(false);
-    } catch { setError("Your product could not be added."); } finally { setBusinessSaving(false); }
-  }
-
-  return (
-    <div className="screen feed-screen">
-      <section className={`feed-hero ${businessMode ? "feed-hero-business" : ""}`}>
-        <span className="feed-kicker">{businessMode ? "HILINGA FOR BUSINESS" : "DISCOVER LEGAZPI"}</span>
-        <h1>{businessMode ? (businessProfile ? `Grow ${businessProfile.name}.` : "Put your business on the map.") : "Find your next local favorite."}</h1>
-        <p>{businessMode ? "Build your local presence and promote products travelers can discover in the Hilinga Feed." : "Places, food, businesses, and experiences worth adding to your trip."}</p>
-        {businessMode && (
-          <div className="business-hero-actions">
-            <button onClick={() => { setBusinessDraft(businessProfile ?? { name: "", category: "", location: "", description: "" }); setBusinessEditorOpen(true); }}>
-              <Icon name={businessProfile ? "edit" : "storefront"} size={18} />{businessProfile ? "Edit business profile" : "Create business profile"}
-            </button>
-            <button className="business-hero-primary" disabled={!businessProfile} onClick={() => setProductEditorOpen(true)}>
-              <Icon name="add" size={19} />Add product
-            </button>
-          </div>
-        )}
-        <div className="feed-search">
-          <Icon name="search" size={20} color="var(--c-muted)" />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search places, businesses, and events" aria-label="Search the feed" />
-          {query && <button onClick={() => setQuery("")} aria-label="Clear feed search"><Icon name="cancel" size={20} color="var(--c-muted)" /></button>}
-        </div>
-      </section>
-
-      {businessMode && businessProfile && (
-        <section className="business-dashboard" aria-label="Business profile">
-          <div className="business-profile-card">
-            <span className="business-avatar"><Icon name="storefront" size={25} /></span>
-            <div><span>{businessProfile.category}</span><h2>{businessProfile.name}</h2><p><Icon name="location_on" size={15} />{businessProfile.location}</p></div>
-            <strong>{products.length}<small> PRODUCTS</small></strong>
-          </div>
-          {businessProfile.description && <p className="business-description">{businessProfile.description}</p>}
-          <div className="feed-section-heading"><div><span>YOUR CATALOG</span><h2>Products you promote</h2></div><button className="business-add-link" onClick={() => setProductEditorOpen(true)}>+ Add product</button></div>
-          {products.length === 0 ? (
-            <div className="business-empty"><Icon name="inventory_2" size={30} /><strong>No products yet</strong><span>Add your first product so it can appear in the Feed.</span><button onClick={() => setProductEditorOpen(true)}>Add first product</button></div>
-          ) : (
-            <div className="business-product-grid">
-              {products.map((product) => <article className="business-product-card" key={product.id}><span className="business-product-icon"><Icon name="sell" size={22} /></span><div><span>{product.category}</span><h3>{product.name}</h3>{product.description && <p>{product.description}</p>}<strong>{product.price || "Price on request"}</strong></div><button aria-label={`Remove ${product.name}`} onClick={() => void onRemoveProduct(product.id)}><Icon name="delete" size={18} /></button></article>)}
-            </div>
-          )}
-        </section>
-      )}
-
-      <div className="feed-category-block">
-        <div className="feed-section-heading">
-          <div><span>BROWSE THE FEED</span><h2>What would you like to discover?</h2></div>
-          <label className="feed-sort">
-            <Icon name="sort" size={17} />
-            <span className="sr-only">Sort feed</span>
-            <select value={sort} onChange={(event) => setSort(event.target.value as FeedSort)} aria-label="Sort feed">
-              <option>Recommended</option>
-              <option>Most visited</option>
-            </select>
-          </label>
-        </div>
-        <div className="chip-scroll feed-kind-filter" aria-label="Feed content types">
-          {(["All", "Places", "Businesses", "Events"] as FeedKind[]).map((value) => (
-            <button key={value} className={`chip feed-kind-chip ${kind === value ? "chip-selected" : ""}`} onClick={() => setKind(value)}>
-              <Icon name={{ All: "apps", Places: "location_on", Businesses: "storefront", Events: "event" }[value]} size={17} />
-              {value}
-            </button>
-          ))}
-        </div>
-        <span className="feed-filter-label">FILTER BY INTEREST</span>
-        <div className="chip-scroll" aria-label="Feed categories">
-          {(["All", "Nature", "Food", "Restaurants", "Cafes", "Heritage", "Shopping"] as FeedCategory[]).map((value) => (
-            <button key={value} className={`chip feed-chip ${category === value ? "chip-selected" : ""}`} onClick={() => setCategory(value)}>
-              {value}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {error && <p className="error-text" role="alert">{error}</p>}
-      {visibleItems.length === 0 ? (
-        <EmptyState icon="travel_explore" title="No ideas found" message="Try another search or browse the full feed." action="Show all ideas" onAction={() => { setQuery(""); setCategory("All"); setKind("All"); }} />
-      ) : (
-        <section className="feed-list" aria-label={`${kind} ${category} travel ideas`}>
-          <div className="feed-section-heading">
-            <div><span>{sort === "Most visited" ? "MOST VISITED" : category === "All" ? "CURATED FOR YOU" : category.toUpperCase()}</span><h2>{kind === "All" ? "Around Legazpi" : kind}</h2></div>
-            <strong>{visibleItems.length}</strong>
-          </div>
-          <div className="feed-grid">
-            {visibleItems.map((item) => {
-              const isSaved = savedIds.has(item.id);
-              return (
-                <article key={item.id} className={`feed-card ${item.featured ? "feed-card-featured" : ""}`}>
-                  <div className="feed-image-wrap">
-                    <img src={item.source} alt={item.name} className="feed-image" />
-                    <span className="feed-category-tag">{item.category}</span>
-                    <button className={`feed-save ${isSaved ? "feed-save-active" : ""}`} onClick={() => toggleSaved(item)} disabled={pendingId !== null} aria-label={isSaved ? `Remove ${item.name} from saved` : `Save ${item.name}`}>
-                      {pendingId === item.id ? <div className="spinner" /> : <Icon name="favorite" size={21} filled={isSaved} />}
-                    </button>
-                  </div>
-                  <div className="feed-card-copy">
-                    <div className="feed-card-title-row"><h3>{item.name}</h3><span className={`feed-kind-pill feed-kind-${item.kind.toLowerCase()}`}>{item.kind === "Businesses" ? "BUSINESS" : item.kind.slice(0, -1).toUpperCase()}</span></div>
-                    <p>{item.description}</p>
-                    {item.detail && <span className="feed-event-detail"><Icon name="schedule" size={15} />{item.detail}</span>}
-                    <div className="feed-card-meta">
-                      <span className="feed-location"><Icon name="location_on" size={16} color="var(--c-green)" />{item.location}</span>
-                      <span className="feed-visits"><Icon name="visibility" size={15} />{Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(item.visits)} visits</span>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-      )}
-      <AppModal visible={businessEditorOpen} title={businessProfile ? "Edit business profile" : "Create business profile"} onClose={() => !businessSaving && setBusinessEditorOpen(false)}>
-        <p className="business-modal-intro">Tell travelers what makes your local business worth discovering.</p>
-        <Field label="Business name" value={businessDraft.name} onChangeText={(name) => setBusinessDraft({ ...businessDraft, name })} placeholder="e.g. Mayon Coffee House" />
-        <Field label="Business category" value={businessDraft.category} onChangeText={(category) => setBusinessDraft({ ...businessDraft, category })} placeholder="Cafe, crafts, tours..." />
-        <Field label="Location" value={businessDraft.location} onChangeText={(location) => setBusinessDraft({ ...businessDraft, location })} placeholder="Legazpi City, Albay" />
-        <Field label="About your business" value={businessDraft.description} onChangeText={(description) => setBusinessDraft({ ...businessDraft, description })} placeholder="Share what makes your business special" multiline />
-        {error && <p className="error-text" role="alert">{error}</p>}
-        <Button label="Save business profile" onPress={saveBusinessProfile} loading={businessSaving} />
-      </AppModal>
-      <AppModal visible={productEditorOpen} title="Add a product" onClose={() => !businessSaving && setProductEditorOpen(false)}>
-        <p className="business-modal-intro">Create a clear product listing for travelers browsing the Feed.</p>
-        <Field label="Product name" value={productDraft.name} onChangeText={(name) => setProductDraft({ ...productDraft, name })} placeholder="e.g. Single-origin Albay coffee" />
-        <Field label="Category" value={productDraft.category} onChangeText={(category) => setProductDraft({ ...productDraft, category })} placeholder="Food, souvenir, tour..." />
-        <Field label="Price (optional)" value={productDraft.price} onChangeText={(price) => setProductDraft({ ...productDraft, price })} placeholder="e.g. ₱350" />
-        <Field label="Description (optional)" value={productDraft.description} onChangeText={(description) => setProductDraft({ ...productDraft, description })} placeholder="What should customers know?" multiline />
-        {error && <p className="error-text" role="alert">{error}</p>}
-        <Button label="Add to Feed" onPress={addProduct} loading={businessSaving} />
-      </AppModal>
-    </div>
-  );
-}
-*/
-
-function CommunityFeedLegacy({ businessMode, businessProfile, products, onSaveBusinessProfile, onAddProduct, onRemoveProduct }: {
-  businessMode: boolean;
-  businessProfile: BusinessProfile | null;
-  products: PromotedProduct[];
-  onSaveBusinessProfile: (profile: BusinessProfile) => Promise<void>;
-  onAddProduct: (product: Omit<PromotedProduct, "id" | "createdAt">) => Promise<void>;
-  onRemoveProduct: (id: string) => Promise<void>;
-}) {
-  const { user, profile, avatarUrl } = useAuth();
-  const [posts, setPosts] = useState<CommunityPost[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [posting, setPosting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<"All" | ExperienceCategory>("All");
-  const [placeName, setPlaceName] = useState("");
-  const [location, setLocation] = useState("");
-  const [experience, setExperience] = useState("");
-  const [postCategory, setPostCategory] = useState<ExperienceCategory>("Place");
-  const [rating, setRating] = useState<number | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<CommunityPost | null>(null);
-  const [businessEditorOpen, setBusinessEditorOpen] = useState(false);
-  const [productEditorOpen, setProductEditorOpen] = useState(false);
-  const [businessDraft, setBusinessDraft] = useState<BusinessProfile>(businessProfile ?? { name: "", category: "", location: "", description: "" });
-  const [productDraft, setProductDraft] = useState({ name: "", category: "", price: "", description: "" });
-  const [businessSaving, setBusinessSaving] = useState(false);
-
-  useEffect(() => subscribeToCommunityPosts(
-    (nextPosts) => { setPosts(nextPosts); setLoading(false); setError(null); },
-    () => { setLoading(false); setError("The community thread could not be loaded. Check your connection and try again."); },
-  ), []);
-
-  const visiblePosts = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    return posts.filter((post) =>
-      (category === "All" || post.category === category)
-      && `${post.authorName} ${post.placeName} ${post.location} ${post.experience}`.toLowerCase().includes(normalizedQuery),
-    );
-  }, [category, posts, query]);
-
-  async function publishPost() {
-    if (!user) { setError("Your session has expired. Please sign in again."); return; }
-    if (!placeName.trim()) { setError("Add the name of the place or establishment."); return; }
-    if (experience.trim().length < 10) { setError("Tell the community a little more about your experience."); return; }
-    setPosting(true); setError(null);
-    try {
-      await createCommunityPost({
-        authorUid: user.uid,
-        authorName: profile?.display_name.trim() || user.displayName || user.email?.split("@")[0] || "Hilinga traveler",
-        authorAvatarUrl: avatarUrl,
-        placeName,
-        location,
-        category: postCategory,
-        experience,
-        rating,
-      });
-      setPlaceName(""); setLocation(""); setExperience(""); setPostCategory("Place"); setRating(null);
-    } catch { setError("Your experience could not be posted. Please try again."); }
-    finally { setPosting(false); }
-  }
-
-  async function removePost() {
-    if (!deleteTarget) return;
-    setPosting(true); setError(null);
-    try { await deleteCommunityPost(deleteTarget.id); setDeleteTarget(null); }
-    catch { setError("That post could not be deleted."); }
-    finally { setPosting(false); }
-  }
-
-  async function saveBusinessProfile() {
-    if (!businessDraft.name.trim() || !businessDraft.category.trim() || !businessDraft.location.trim()) { setError("Add your business name, category, and location."); return; }
-    setBusinessSaving(true); setError(null);
-    try { await onSaveBusinessProfile({ ...businessDraft, name: businessDraft.name.trim(), category: businessDraft.category.trim(), location: businessDraft.location.trim(), description: businessDraft.description.trim() }); setBusinessEditorOpen(false); }
-    catch { setError("Your business profile could not be saved."); }
-    finally { setBusinessSaving(false); }
-  }
-
-  async function addProduct() {
-    if (!productDraft.name.trim() || !productDraft.category.trim()) { setError("Add a product name and category."); return; }
-    setBusinessSaving(true); setError(null);
-    try { await onAddProduct({ ...productDraft, name: productDraft.name.trim(), category: productDraft.category.trim(), price: productDraft.price.trim(), description: productDraft.description.trim() }); setProductDraft({ name: "", category: "", price: "", description: "" }); setProductEditorOpen(false); }
-    catch { setError("Your product could not be added."); }
-    finally { setBusinessSaving(false); }
-  }
-
-  function postTime(post: CommunityPost) {
-    if (!post.createdAt) return "Posting now";
-    return new Intl.DateTimeFormat("en-PH", { dateStyle: "medium", timeStyle: "short" }).format(post.createdAt.toDate());
-  }
-
-  return (
-    <div className="screen feed-screen">
-      <section className={`feed-hero ${businessMode ? "feed-hero-business" : ""}`}>
-        <span className="feed-kicker">{businessMode ? "HILINGA FOR BUSINESS" : "HILINGA COMMUNITY"}</span>
-        <h1>{businessMode ? (businessProfile ? `Grow ${businessProfile.name}.` : "Put your business on the map.") : "Real stories from real travelers."}</h1>
-        <p>{businessMode ? "Manage your local presence, then join the same community conversation as travelers." : "Share what happened at a place, restaurant, cafe, stay, event, or local establishment."}</p>
-        {businessMode && <div className="business-hero-actions"><button onClick={() => { setBusinessDraft(businessProfile ?? { name: "", category: "", location: "", description: "" }); setBusinessEditorOpen(true); }}><Icon name={businessProfile ? "edit" : "storefront"} size={18} />{businessProfile ? "Edit business profile" : "Create business profile"}</button><button className="business-hero-primary" disabled={!businessProfile} onClick={() => setProductEditorOpen(true)}><Icon name="add" size={19} />Add product</button></div>}
-        <div className="feed-search"><Icon name="search" size={20} color="var(--c-muted)" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search people, places, or experiences" aria-label="Search community posts" />{query && <button onClick={() => setQuery("")} aria-label="Clear search"><Icon name="cancel" size={20} color="var(--c-muted)" /></button>}</div>
-      </section>
-
-      {businessMode && businessProfile && <section className="business-dashboard" aria-label="Business profile"><div className="business-profile-card"><span className="business-avatar"><Icon name="storefront" size={25} /></span><div><span>{businessProfile.category}</span><h2>{businessProfile.name}</h2><p><Icon name="location_on" size={15} />{businessProfile.location}</p></div><strong>{products.length}<small> PRODUCTS</small></strong></div>{businessProfile.description && <p className="business-description">{businessProfile.description}</p>}<div className="feed-section-heading"><div><span>YOUR CATALOG</span><h2>Products you promote</h2></div><button className="business-add-link" onClick={() => setProductEditorOpen(true)}>+ Add product</button></div>{products.length === 0 ? <div className="business-empty"><Icon name="inventory_2" size={30} /><strong>No products yet</strong><span>Add your first product so travelers can discover it.</span><button onClick={() => setProductEditorOpen(true)}>Add first product</button></div> : <div className="business-product-grid">{products.map((product) => <article className="business-product-card" key={product.id}><span className="business-product-icon"><Icon name="sell" size={22} /></span><div><span>{product.category}</span><h3>{product.name}</h3>{product.description && <p>{product.description}</p>}<strong>{product.price || "Price on request"}</strong></div><button aria-label={`Remove ${product.name}`} onClick={() => void onRemoveProduct(product.id)}><Icon name="delete" size={18} /></button></article>)}</div>}</section>}
-
-      <section className="thread-composer" aria-labelledby="share-experience-title">
-        <div className="thread-composer-heading"><span className="thread-avatar">{avatarUrl ? <img src={avatarUrl} alt="Your profile" /> : (profile?.display_name || user?.email || "H").charAt(0).toUpperCase()}</span><div><span>START A CONVERSATION</span><h2 id="share-experience-title">Share your experience</h2></div></div>
-        <div className="thread-form-grid"><label><span>Place or establishment *</span><input list="community-place-suggestions" value={placeName} maxLength={120} onChange={(event) => setPlaceName(event.target.value)} placeholder="e.g. Cagsawa Ruins" /></label><datalist id="community-place-suggestions">{placeSuggestions.map((item) => <option key={item.id} value={item.name} />)}</datalist><label><span>Area or address</span><input value={location} maxLength={160} onChange={(event) => setLocation(event.target.value)} placeholder="e.g. Daraga, Albay" /></label><label><span>Type</span><select value={postCategory} onChange={(event) => setPostCategory(event.target.value as ExperienceCategory)}>{experienceCategories.map((value) => <option key={value}>{value}</option>)}</select></label></div>
-        <label className="thread-experience-field"><span>Your experience *</span><textarea value={experience} maxLength={1500} rows={4} onChange={(event) => setExperience(event.target.value)} placeholder="What did you enjoy? What should future visitors know?" /><small>{experience.length}/1500</small></label>
-        <div className="thread-composer-footer"><div className="thread-rating" aria-label="Optional rating"><span>Rating</span>{[1, 2, 3, 4, 5].map((star) => <button key={star} type="button" className={rating !== null && star <= rating ? "thread-star-active" : ""} onClick={() => setRating(rating === star ? null : star)} aria-label={`${star} star${star === 1 ? "" : "s"}`}><Icon name="star" size={23} filled={rating !== null && star <= rating} /></button>)}</div><button className="thread-publish" disabled={posting || !placeName.trim() || experience.trim().length < 10} onClick={() => void publishPost()}>{posting ? <div className="spinner" /> : <Icon name="send" size={18} />}Post experience</button></div>
-      </section>
-
-      {error && <p className="error-text" role="alert">{error}</p>}
-      <section className="community-thread" aria-label="Community experiences"><div className="feed-section-heading"><div><span>COMMUNITY THREAD</span><h2>Latest experiences</h2></div><strong>{visiblePosts.length}</strong></div><div className="chip-scroll" aria-label="Filter community posts">{(["All", ...experienceCategories] as const).map((value) => <button key={value} className={`chip feed-chip ${category === value ? "chip-selected" : ""}`} onClick={() => setCategory(value)}>{value}</button>)}</div>{loading ? <div className="thread-loading"><div className="spinner" /><span>Loading community stories...</span></div> : visiblePosts.length === 0 ? <EmptyState icon="forum" title={posts.length === 0 ? "Start the community thread" : "No posts found"} message={posts.length === 0 ? "Be the first to share an experience from a place or establishment." : "Try a different search or category."} action={posts.length === 0 ? undefined : "Show all posts"} onAction={posts.length === 0 ? undefined : () => { setQuery(""); setCategory("All"); }} /> : <div className="thread-posts">{visiblePosts.map((post) => <article className="thread-post" key={post.id}><header><span className="thread-avatar">{post.authorAvatarUrl ? <img src={post.authorAvatarUrl} alt="" /> : post.authorName.charAt(0).toUpperCase()}</span><div><strong>{post.authorName}</strong><span>{postTime(post)}</span></div>{post.authorUid === user?.uid && <button className="thread-delete" onClick={() => setDeleteTarget(post)} aria-label={`Delete your post about ${post.placeName}`}><Icon name="delete" size={19} /></button>}</header><div className="thread-post-place"><span className="thread-category"><Icon name="location_on" size={15} />{post.category}</span><div><h3>{post.placeName}</h3>{post.location && <span>{post.location}</span>}</div>{post.rating !== null && <span className="thread-post-rating"><Icon name="star" size={17} filled />{post.rating}/5</span>}</div><p>{post.experience}</p></article>)}</div>}</section>
-
-      <AppModal visible={businessEditorOpen} title={businessProfile ? "Edit business profile" : "Create business profile"} onClose={() => !businessSaving && setBusinessEditorOpen(false)}><p className="business-modal-intro">Tell travelers what makes your local business worth discovering.</p><Field label="Business name" value={businessDraft.name} onChangeText={(name) => setBusinessDraft({ ...businessDraft, name })} placeholder="e.g. Mayon Coffee House" /><Field label="Business category" value={businessDraft.category} onChangeText={(categoryValue) => setBusinessDraft({ ...businessDraft, category: categoryValue })} placeholder="Cafe, crafts, tours..." /><Field label="Location" value={businessDraft.location} onChangeText={(locationValue) => setBusinessDraft({ ...businessDraft, location: locationValue })} placeholder="Legazpi City, Albay" /><Field label="About your business" value={businessDraft.description} onChangeText={(description) => setBusinessDraft({ ...businessDraft, description })} placeholder="Share what makes your business special" multiline /><Button label="Save business profile" onPress={saveBusinessProfile} loading={businessSaving} /></AppModal>
-      <AppModal visible={productEditorOpen} title="Add a product" onClose={() => !businessSaving && setProductEditorOpen(false)}><p className="business-modal-intro">Create a clear product listing for travelers browsing Hilinga.</p><Field label="Product name" value={productDraft.name} onChangeText={(name) => setProductDraft({ ...productDraft, name })} placeholder="e.g. Single-origin Albay coffee" /><Field label="Category" value={productDraft.category} onChangeText={(categoryValue) => setProductDraft({ ...productDraft, category: categoryValue })} placeholder="Food, souvenir, tour..." /><Field label="Price (optional)" value={productDraft.price} onChangeText={(price) => setProductDraft({ ...productDraft, price })} placeholder="e.g. ₱350" /><Field label="Description (optional)" value={productDraft.description} onChangeText={(description) => setProductDraft({ ...productDraft, description })} placeholder="What should customers know?" multiline /><Button label="Add product" onPress={addProduct} loading={businessSaving} /></AppModal>
-      <ConfirmModal visible={deleteTarget !== null} title="Delete this post?" message={deleteTarget ? `Your experience about “${deleteTarget.placeName}” will be permanently removed.` : ""} confirmLabel="Delete post" loading={posting} onCancel={() => !posting && setDeleteTarget(null)} onConfirm={removePost} />
-    </div>
-  );
-}
-
-void CommunityFeedLegacy;
 
 function Feed({ onOpenBusiness }: { onOpenBusiness: (businessId: string) => void }) {
   const { user } = useAuth();
@@ -3300,11 +2940,21 @@ function Emergency({ onClose, showNotice }: { onClose: () => void; showNotice: (
   );
 }
 
-// ── Main App Shell ──
+// ── Main App Shell — ViewCache KeepAlive + IndexedDB cache ──
 
 export function HilingaApp() {
+  return (
+    <ViewCacheProvider initial="Home">
+      <HilingaAppShell />
+    </ViewCacheProvider>
+  );
+}
+
+function HilingaAppShell() {
   const db = useDatabase();
-  const [tab, setTab] = useState<Tab>("Home");
+  const { activeTab, setActiveTab, visited } = useViewCache();
+  const tab = activeTab as Tab;
+  const setTab = setActiveTab as (t: Tab) => void;
   const [mapOpen, setMapOpen] = useState(false);
   const [mapPlanId, setMapPlanId] = useState<string | null>(null);
   const [exploreFilter, setExploreFilter] = useState<string | null>(null);
@@ -3350,11 +3000,23 @@ export function HilingaApp() {
     <div className={`app-shell ${businessMode ? "business-mode" : ""}`}>
       <div className="app-content">
         {mapOpen && <MapScreen onClose={() => setMapOpen(false)} initialPlanId={mapPlanId} />}
-        {!mapOpen && tab === "Home" && <Home setTab={setTab} openMap={() => { setMapPlanId(null); setMapOpen(true); }} openEmergency={() => setEmergency(true)} showNotice={setNotice} />}
-        {!mapOpen && tab === "Explore" && <Explore initialFilter={exploreFilter} initialBusinessId={exploreBusinessId} onFilterHandled={handleFilter} onBusinessHandled={handleBusiness} />}
-        {!mapOpen && tab === "Planner" && <Planner onOpenMap={(planId) => { setMapPlanId(planId); setMapOpen(true); }} />}
-        {!mapOpen && tab === "Feed" && <Feed onOpenBusiness={openBusiness} />}
-        {!mapOpen && tab === "Profile" && <ProfileScreen goPlanner={() => setTab("Planner")} goExplore={() => setTab("Explore")} onReset={reset} businessMode={businessMode} />}
+        <div style={{ display: mapOpen ? "none" : "contents" }}>
+          <KeepAliveTab tab="Home" active={tab} visited={visited}>
+            <Home setTab={setTab} openMap={() => { setMapPlanId(null); setMapOpen(true); }} openEmergency={() => setEmergency(true)} showNotice={setNotice} />
+          </KeepAliveTab>
+          <KeepAliveTab tab="Explore" active={tab} visited={visited}>
+            <Explore initialFilter={exploreFilter} initialBusinessId={exploreBusinessId} onFilterHandled={handleFilter} onBusinessHandled={handleBusiness} />
+          </KeepAliveTab>
+          <KeepAliveTab tab="Planner" active={tab} visited={visited}>
+            <Planner onOpenMap={(planId) => { setMapPlanId(planId); setMapOpen(true); }} />
+          </KeepAliveTab>
+          <KeepAliveTab tab="Feed" active={tab} visited={visited}>
+            <Feed onOpenBusiness={openBusiness} />
+          </KeepAliveTab>
+          <KeepAliveTab tab="Profile" active={tab} visited={visited}>
+            <ProfileScreen goPlanner={() => setTab("Planner")} goExplore={() => setTab("Explore")} onReset={reset} businessMode={businessMode} />
+          </KeepAliveTab>
+        </div>
       </div>
       <BottomTabs active={mapOpen ? "Explore" : tab} onChange={(next) => { setMapOpen(false); setTab(next); }} />
       <AppModal visible={notice !== null} title={notice?.title ?? "Notice"} onClose={() => setNotice(null)}>
