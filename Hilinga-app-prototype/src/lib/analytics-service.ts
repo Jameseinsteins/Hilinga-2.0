@@ -1,15 +1,13 @@
-import {
-  collection,
-  query,
-  where,
-  getDocs,
-  onSnapshot,
-  type Timestamp,
-  type Unsubscribe,
-} from "firebase/firestore";
-
-import { firestore } from "@/lib/firebase";
 import { isSupabaseConfigured, supabase, withSupabaseTimeout } from "@/lib/supabase";
+export type Unsubscribe = () => void;
+
+export class Timestamp {
+  constructor(public seconds: number, public nanoseconds: number) {}
+  static fromDate(d: Date) { return new Timestamp(Math.floor(d.getTime()/1000), (d.getTime()%1000)*1e6); }
+  toDate() { return new Date(this.seconds*1000 + this.nanoseconds/1e6); }
+  toMillis() { return this.seconds*1000 + this.nanoseconds/1e6; }
+  static now() { return Timestamp.fromDate(new Date()); }
+}
 
 export type AnalyticsPeriod = "day" | "week" | "month" | "year";
 
@@ -50,7 +48,11 @@ interface TouristVisit {
   createdAt: string;
 }
 
-const visits = collection(firestore, "touristVisitLogs");
+function requireSupabase() {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.");
+  }
+}
 
 export function toDate(value: unknown): Date {
   if (value && typeof (value as Timestamp).toDate === "function") {
@@ -326,49 +328,15 @@ export async function getBusinessVisitorStats(
   businessId: string,
   period: AnalyticsPeriod = "month",
 ): Promise<BusinessVisitorStats> {
+  requireSupabase();
   const { start, end } = getDateRange(period);
-
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const visits = await supabaseGetBusinessVisits(businessId, start, end);
-      return aggregateBusinessStats(visits);
-    } catch (error) {
-      console.warn("[analytics] Supabase getBusinessVisitorStats failed, falling back:", error);
-    }
-  }
-
-  const q = query(
-    visits,
-    where("businessId", "==", businessId),
-    where("visitedAt", ">=", start),
-    where("visitedAt", "<=", end),
-  );
-
-  const snapshot = await getDocs(q);
-  const visitDocs = snapshot.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-  } as TouristVisit & { id: string }));
-
-  return aggregateBusinessStats(visitDocs);
+  const visits = await supabaseGetBusinessVisits(businessId, start, end);
+  return aggregateBusinessStats(visits);
 }
 
 export async function getAdminTouristStats(): Promise<AdminTouristStats> {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const visitDocs = await supabaseGetAllVisits();
-      return aggregateAdminStats(visitDocs);
-    } catch (error) {
-      console.warn("[analytics] Supabase getAdminTouristStats failed, falling back:", error);
-    }
-  }
-
-  const snapshot = await getDocs(visits);
-  const visitDocs = snapshot.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-  } as TouristVisit & { id: string }));
-
+  requireSupabase();
+  const visitDocs = await supabaseGetAllVisits();
   return aggregateAdminStats(visitDocs);
 }
 
@@ -377,55 +345,14 @@ export function subscribeToBusinessAnalytics(
   onData: (stats: BusinessVisitorStats) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
-  if (isSupabaseConfigured && supabase) {
-    return supabaseSubscribeToBusinessAnalytics(businessId, onData, onError);
-  }
-
-  const { start, end } = getDateRange("month");
-
-  const q = query(
-    visits,
-    where("businessId", "==", businessId),
-    where("visitedAt", ">=", start),
-    where("visitedAt", "<=", end),
-  );
-
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const visitDocs = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      } as TouristVisit & { id: string }));
-
-      onData(aggregateBusinessStats(visitDocs));
-    },
-    (error) => {
-      if (onError) onError(new Error(`Analytics subscription failed: ${error.message}`));
-    },
-  );
+  requireSupabase();
+  return supabaseSubscribeToBusinessAnalytics(businessId, onData, onError);
 }
 
 export function subscribeToAdminAnalytics(
   onData: (stats: AdminTouristStats) => void,
   onError?: (error: Error) => void,
 ): Unsubscribe {
-  if (isSupabaseConfigured && supabase) {
-    return supabaseSubscribeToAdminAnalytics(onData, onError);
-  }
-
-  return onSnapshot(
-    visits,
-    (snapshot) => {
-      const visitDocs = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      } as TouristVisit & { id: string }));
-
-      onData(aggregateAdminStats(visitDocs));
-    },
-    (error) => {
-      if (onError) onError(new Error(`Admin analytics subscription failed: ${error.message}`));
-    },
-  );
+  requireSupabase();
+  return supabaseSubscribeToAdminAnalytics(onData, onError);
 }

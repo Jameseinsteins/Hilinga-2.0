@@ -2,12 +2,15 @@
  * Payment Service - Handles all payment processing, transaction management, and state
  * Supports multiple payment methods: card, digital wallet, cash on arrival
  * Implements retry logic with exponential backoff and offline queueing
- * Supabase-first with Firestore fallback (Phase 1: Firebase uid = TEXT)
+ * Supabase-only (Phase 2: Firebase uid = TEXT id, no Firestore fallback)
  */
 
-import { firestore as db } from '@/lib/firebase';
-import { doc, setDoc, updateDoc, getDoc } from 'firebase/firestore';
+// Firestore removed — Supabase-only (Phase 2)
 import { isSupabaseConfigured, supabase, withSupabaseTimeout } from '@/lib/supabase';
+
+function requireSupabase() {
+  if (!isSupabaseConfigured || !supabase) throw new Error('Supabase is not configured.');
+}
 
 // ============================================================================
 // Types & Interfaces
@@ -339,18 +342,9 @@ export class PaymentService {
       updatedAt: Date.now(),
     };
 
-    // Supabase-first, Firestore fallback
-    if (isSupabaseConfigured && supabase) {
-      try {
-        await supabaseUpsertBooking(booking);
-        return booking;
-      } catch (error) {
-        console.warn('[payment-service] Supabase createBooking failed, falling back to Firestore:', error);
-      }
-    }
-
+    requireSupabase();
     try {
-      await setDoc(doc(db, `users/${userId}/bookings`, bookingId), booking);
+      await supabaseUpsertBooking(booking);
       return booking;
     } catch (error) {
       console.error('Failed to create booking:', error);
@@ -387,38 +381,23 @@ export class PaymentService {
       await this.validatePaymentMethod(paymentMethod, cardDetails);
 
       // Update booking status -> awaiting_payment / processing (Supabase-first)
-      const awaitingPatchSnake = {
-        status: 'awaiting_payment',
-        payment_status: 'processing',
-        payment_id: paymentId,
-        updated_at: String(Date.now()),
-        sync_state: 'synced',
-      };
-      const awaitingFallback = {
-        status: 'awaiting_payment',
-        paymentStatus: 'processing',
-        paymentId,
-        updatedAt: Date.now(),
-      };
-      if (isSupabaseConfigured && supabase) {
-        let supabaseOk = false;
+      requireSupabase();
+      try {
+        await supabasePatchBooking(booking.userId, booking.id, {
+          status: 'awaiting_payment',
+          payment_status: 'processing',
+          payment_id: paymentId,
+          updated_at: String(Date.now()),
+          sync_state: 'synced',
+        });
+      } catch {
         try {
-          await supabasePatchBooking(booking.userId, booking.id, awaitingPatchSnake);
-          supabaseOk = true;
-        } catch {
-          try {
-            const merged: Booking = { ...booking, status: 'awaiting_payment', paymentStatus: 'processing', paymentId, updatedAt: Date.now() };
-            await supabaseUpsertBooking(merged);
-            supabaseOk = true;
-          } catch (e) {
-            console.warn('[payment-service] Supabase update booking to awaiting_payment failed, falling back:', e);
-          }
+          const merged: Booking = { ...booking, status: 'awaiting_payment', paymentStatus: 'processing', paymentId, updatedAt: Date.now() };
+          await supabaseUpsertBooking(merged);
+        } catch (e2) {
+          console.error('[payment-service] Supabase awaiting_payment upsert failed:', e2);
+          throw e2 as Error;
         }
-        if (!supabaseOk) {
-          await updateDoc(doc(db, `users/${booking.userId}/bookings`, booking.id), awaitingFallback);
-        }
-      } else {
-        await updateDoc(doc(db, `users/${booking.userId}/bookings`, booking.id), awaitingFallback);
       }
 
       // Process payment (call cloud function)
@@ -435,38 +414,18 @@ export class PaymentService {
         });
 
         // Update booking status -> paid/completed (Supabase-first)
-        const paidPatchSnake = {
-          status: 'paid',
-          payment_status: 'completed',
-          payment_id: paymentId,
-          updated_at: String(Date.now()),
-          sync_state: 'synced',
-        };
-        const paidFallback = {
-          status: 'paid',
-          paymentStatus: 'completed',
-          paymentId,
-          updatedAt: Date.now(),
-        };
-        if (isSupabaseConfigured && supabase) {
-          let paidOk = false;
-          try {
-            await supabasePatchBooking(booking.userId, booking.id, paidPatchSnake);
-            paidOk = true;
-          } catch {
-            try {
-              const merged: Booking = { ...booking, status: 'paid', paymentStatus: 'completed', paymentId, updatedAt: Date.now() };
-              await supabaseUpsertBooking(merged);
-              paidOk = true;
-            } catch (e) {
-              console.warn('[payment-service] Supabase update booking to paid failed, falling back:', e);
-            }
-          }
-          if (!paidOk) {
-            await updateDoc(doc(db, `users/${booking.userId}/bookings`, booking.id), paidFallback);
-          }
-        } else {
-          await updateDoc(doc(db, `users/${booking.userId}/bookings`, booking.id), paidFallback);
+        requireSupabase();
+        try {
+          await supabasePatchBooking(booking.userId, booking.id, {
+            status: 'paid',
+            payment_status: 'completed',
+            payment_id: paymentId,
+            updated_at: String(Date.now()),
+            sync_state: 'synced',
+          });
+        } catch {
+          const merged: Booking = { ...booking, status: 'paid', paymentStatus: 'completed', paymentId, updatedAt: Date.now() };
+          await supabaseUpsertBooking(merged);
         }
 
         return {
@@ -498,22 +457,10 @@ export class PaymentService {
     cardDetails?: CardDetails
   ): Promise<PaymentResult> {
     try {
-      // Supabase-first fetch
-      let payment: PaymentTransaction | null = null;
-      if (isSupabaseConfigured && supabase) {
-        try {
-          payment = await supabaseFetchPayment(userId, paymentId);
-        } catch (error) {
-          console.warn('[payment-service] Supabase fetch payment failed, trying Firestore:', error);
-        }
-      }
+      requireSupabase();
+      const payment = await supabaseFetchPayment(userId, paymentId);
       if (!payment) {
-        const paymentRef = doc(db, `users/${userId}/payments`, paymentId);
-        const paymentSnap = await getDoc(paymentRef);
-        if (!paymentSnap.exists()) {
-          throw { code: 'PAYMENT_NOT_FOUND', message: 'Payment transaction not found', retryable: false };
-        }
-        payment = paymentSnap.data() as PaymentTransaction;
+        throw { code: 'PAYMENT_NOT_FOUND', message: 'Payment transaction not found', retryable: false };
       }
 
       if (payment.status === 'completed') {
@@ -532,18 +479,11 @@ export class PaymentService {
 
       // Update retry count (Supabase-first)
       const nextRetryCount = payment.retryCount + 1;
-      const retryPatchSnake = { retry_count: nextRetryCount, updated_at: String(Date.now()), sync_state: 'synced' };
-      const retryFallback = { retryCount: nextRetryCount, updatedAt: Date.now() };
-      if (isSupabaseConfigured && supabase) {
-        try {
-          await supabasePatchPayment(userId, paymentId, retryPatchSnake);
-        } catch (error) {
-          console.warn('[payment-service] Supabase increment retryCount failed, falling back:', error);
-          await updateDoc(doc(db, `users/${userId}/payments`, paymentId), retryFallback);
-        }
-      } else {
-        await updateDoc(doc(db, `users/${userId}/payments`, paymentId), retryFallback);
-      }
+      await supabasePatchPayment(userId, paymentId, {
+        retry_count: nextRetryCount,
+        updated_at: String(Date.now()),
+        sync_state: 'synced',
+      });
 
       // Attempt payment again
       const result = await this.callPaymentProcessor({ ...payment, retryCount: nextRetryCount }, cardDetails);
@@ -562,16 +502,7 @@ export class PaymentService {
           processedAt: Date.now(),
           updatedAt: Date.now(),
         };
-        if (isSupabaseConfigured && supabase) {
-          try {
-            await supabasePatchPayment(userId, paymentId, completedSnake);
-          } catch (error) {
-            console.warn('[payment-service] Supabase complete payment failed, falling back:', error);
-            await updateDoc(doc(db, `users/${userId}/payments`, paymentId), completedFallback);
-          }
-        } else {
-          await updateDoc(doc(db, `users/${userId}/payments`, paymentId), completedFallback);
-        }
+                await supabasePatchPayment(userId, paymentId, completedSnake);
 
         // Get booking and update status
         const booking = await this.getBooking(payment.userId, payment.bookingId);
@@ -582,30 +513,11 @@ export class PaymentService {
             updated_at: String(Date.now()),
             sync_state: 'synced',
           };
-          const paidFallback = {
-            status: 'paid',
-            paymentStatus: 'completed',
-            updatedAt: Date.now(),
-          };
-          if (isSupabaseConfigured && supabase) {
-            let paidOk = false;
-            try {
-              await supabasePatchBooking(payment.userId, booking.id, paidPatchSnake);
-              paidOk = true;
-            } catch {
-              try {
-                const merged: Booking = { ...booking, status: 'paid', paymentStatus: 'completed', updatedAt: Date.now() };
-                await supabaseUpsertBooking(merged);
-                paidOk = true;
-              } catch (e) {
-                console.warn('[payment-service] Supabase update booking after retry failed, falling back:', e);
-              }
-            }
-            if (!paidOk) {
-              await updateDoc(doc(db, `users/${payment.userId}/bookings`, booking.id), paidFallback);
-            }
-          } else {
-            await updateDoc(doc(db, `users/${payment.userId}/bookings`, booking.id), paidFallback);
+          try {
+            await supabasePatchBooking(payment.userId, booking.id, paidPatchSnake);
+          } catch {
+            const merged: Booking = { ...booking, status: 'paid', paymentStatus: 'completed', updatedAt: Date.now() };
+            await supabaseUpsertBooking(merged);
           }
         }
 
@@ -638,21 +550,9 @@ export class PaymentService {
     amount?: number
   ): Promise<{ success: boolean; refundId?: string; message: string }> {
     try {
-      let payment: PaymentTransaction | null = null;
-      if (isSupabaseConfigured && supabase) {
-        try {
-          payment = await supabaseFetchPayment(userId, paymentId);
-        } catch (error) {
-          console.warn('[payment-service] Supabase fetch payment for refund failed, trying Firestore:', error);
-        }
-      }
+      const payment = await supabaseFetchPayment(userId, paymentId);
       if (!payment) {
-        const paymentRef = doc(db, `users/${userId}/payments`, paymentId);
-        const paymentSnap = await getDoc(paymentRef);
-        if (!paymentSnap.exists()) {
-          throw { code: 'PAYMENT_NOT_FOUND', message: 'Payment not found', retryable: false };
-        }
-        payment = paymentSnap.data() as PaymentTransaction;
+        throw { code: 'PAYMENT_NOT_FOUND', message: 'Payment not found', retryable: false };
       }
 
       if (payment.status !== 'completed' && payment.status !== 'partially_refunded') {
@@ -681,28 +581,12 @@ export class PaymentService {
 
       if (result.success) {
         const newStatus = refundAmount === payment.amount ? 'refunded' : 'partially_refunded';
-
-        const refundPatchSnake = {
+        await supabasePatchPayment(userId, paymentId, {
           status: newStatus,
           refunded_at: String(Date.now()),
           updated_at: String(Date.now()),
           sync_state: 'synced',
-        };
-        const refundFallback = {
-          status: newStatus,
-          refundedAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-        if (isSupabaseConfigured && supabase) {
-          try {
-            await supabasePatchPayment(userId, paymentId, refundPatchSnake);
-          } catch (error) {
-            console.warn('[payment-service] Supabase refund patch failed, falling back:', error);
-            await updateDoc(doc(db, `users/${userId}/payments`, paymentId), refundFallback);
-          }
-        } else {
-          await updateDoc(doc(db, `users/${userId}/payments`, paymentId), refundFallback);
-        }
+        });
 
         // Update booking if fully refunded
         if (newStatus === 'refunded') {
@@ -715,31 +599,11 @@ export class PaymentService {
               updated_at: String(Date.now()),
               sync_state: 'synced',
             };
-            const cancelFallback = {
-              status: 'cancelled',
-              paymentStatus: 'refunded',
-              cancelledAt: Date.now(),
-              updatedAt: Date.now(),
-            };
-            if (isSupabaseConfigured && supabase) {
-              let cancelOk = false;
-              try {
-                await supabasePatchBooking(userId, booking.id, cancelPatchSnake);
-                cancelOk = true;
-              } catch {
-                try {
-                  const merged: Booking = { ...booking, status: 'cancelled', paymentStatus: 'refunded', cancelledAt: Date.now(), updatedAt: Date.now() };
-                  await supabaseUpsertBooking(merged);
-                  cancelOk = true;
-                } catch (e) {
-                  console.warn('[payment-service] Supabase cancel booking after refund failed, falling back:', e);
-                }
-              }
-              if (!cancelOk) {
-                await updateDoc(doc(db, `users/${userId}/bookings`, booking.id), cancelFallback);
-              }
-            } else {
-              await updateDoc(doc(db, `users/${userId}/bookings`, booking.id), cancelFallback);
+            try {
+              await supabasePatchBooking(userId, booking.id, cancelPatchSnake);
+            } catch {
+              const merged: Booking = { ...booking, status: 'cancelled', paymentStatus: 'refunded', cancelledAt: Date.now(), updatedAt: Date.now() };
+              await supabaseUpsertBooking(merged);
             }
           }
         }
@@ -853,41 +717,16 @@ export class PaymentService {
    * Record payment transaction
    */
   private async recordPayment(userId: string, payment: PaymentTransaction): Promise<void> {
-    if (isSupabaseConfigured && supabase) {
-      try {
-        await supabaseUpsertPayment(payment);
-        return;
-      } catch (error) {
-        console.warn('[payment-service] Supabase recordPayment failed, falling back:', error);
-      }
-    }
-    try {
-      await setDoc(doc(db, `users/${userId}/payments`, payment.id), payment);
-    } catch (error) {
-      console.error('Failed to record payment:', error);
-      throw error;
-    }
+    requireSupabase();
+    await supabaseUpsertPayment(payment);
   }
 
   /**
    * Get booking by ID
    */
   private async getBooking(userId: string, bookingId: string): Promise<Booking | null> {
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const fetched = await supabaseFetchBooking(userId, bookingId);
-        if (fetched) return fetched;
-      } catch (error) {
-        console.warn('[payment-service] Supabase getBooking failed, trying Firestore:', error);
-      }
-    }
-    try {
-      const snap = await getDoc(doc(db, `users/${userId}/bookings`, bookingId));
-      return snap.exists() ? (snap.data() as Booking) : null;
-    } catch (error) {
-      console.error('Error getting booking:', error);
-      return null;
-    }
+    requireSupabase();
+    return supabaseFetchBooking(userId, bookingId);
   }
 
   /**

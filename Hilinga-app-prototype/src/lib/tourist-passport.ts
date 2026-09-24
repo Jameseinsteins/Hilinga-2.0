@@ -1,17 +1,3 @@
-import {
-  collection,
-  doc,
-  getDocs,
-  getDoc,
-  limit,
-  onSnapshot,
-  query,
-  setDoc,
-  where,
-  writeBatch,
-} from "firebase/firestore";
-
-import { firestore } from "@/lib/firebase";
 import { isSupabaseConfigured, supabase, withSupabaseTimeout } from "@/lib/supabase";
 
 export type TouristQrStatus = "active" | "disabled" | "revoked";
@@ -58,9 +44,11 @@ export type TouristVisit = {
   createdAt: string;
 };
 
-const profiles = collection(firestore, "touristProfiles");
-const qrCodes = collection(firestore, "touristQrCodes");
-const visits = collection(firestore, "touristVisitLogs");
+function requireSupabase() {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.");
+  }
+}
 
 function now() {
   return new Date().toISOString();
@@ -100,16 +88,7 @@ function normalizePassport(ownerUid: string, value: Partial<TouristPassport>): T
   };
 }
 
-function qrRegistryRecord(passport: TouristPassport, status = passport.qrStatus) {
-  return {
-    ownerUid: passport.ownerUid,
-    status,
-    createdAt: passport.createdAt,
-    updatedAt: passport.updatedAt,
-  };
-}
-
-// ── Offline cache (localStorage) — makes QR work when client is offline ──
+// ── Offline cache (localStorage) ──
 
 const PASSPORT_CACHE_PREFIX = "hilinga:passport:";
 
@@ -297,71 +276,44 @@ async function supabaseCommitPassport(passport: TouristPassport, revokedToken?: 
 }
 
 async function commitPassport(passport: TouristPassport, revokedToken?: string) {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      return await supabaseCommitPassport(passport, revokedToken);
-    } catch (error) {
-      if (!isOfflineError(error)) console.warn("[tourist-passport] Supabase commit fallback:", error);
-      else console.warn("[tourist-passport] Supabase offline — using local cache for QR:", error);
-      // If offline and we already have persistence+pinned cache, still queue to Firestore below
-    }
-  }
+  requireSupabase();
   try {
-    const batch = writeBatch(firestore);
-    batch.set(doc(profiles, passport.ownerUid), passport, { merge: true });
-    batch.set(doc(qrCodes, passport.qrToken), qrRegistryRecord(passport), { merge: true });
-    if (revokedToken && revokedToken !== passport.qrToken) {
-      batch.set(doc(qrCodes, revokedToken), qrRegistryRecord(passport, "revoked"), { merge: true });
-    }
-    await batch.commit();
+    return await supabaseCommitPassport(passport, revokedToken);
   } catch (error) {
     if (isOfflineError(error)) {
-      console.warn("[tourist-passport] Firestore offline — QR will sync when back online:", error);
+      console.warn("[tourist-passport] Supabase offline — QR will sync when back online:", error);
       savePassportToCache(passport);
       return passport;
     }
     throw error as Error;
   }
-  savePassportToCache(passport);
-  return passport;
 }
 
 export async function getTouristPassport(ownerUid: string) {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { data, error } = (await withSupabaseTimeout(
-        supabase.from("tourist_profiles").select("*").eq("owner_uid", ownerUid).maybeSingle(),
-        "Supabase tourist passport fetch timed out.",
-      )) as { data: TouristProfileRow | null; error: { message: string } | null };
-      if (error) throw new Error(error.message);
-      if (data) {
-        const passport = supabaseRowToPassport(data);
-        savePassportToCache(passport);
-        return passport;
-      }
-    } catch (error) {
-      if (isOfflineError(error)) {
-        const cached = loadPassportFromCache(ownerUid);
-        if (cached) return cached;
-      }
-      console.warn("[tourist-passport] Supabase getTouristPassport fallback:", error);
-    }
-  }
+  requireSupabase();
+  const cached = loadPassportFromCache(ownerUid);
   try {
-    const snapshot = await getDoc(doc(profiles, ownerUid));
-    if (snapshot.exists()) {
-      const passport = normalizePassport(ownerUid, snapshot.data() as Partial<TouristPassport>);
+    const { data, error } = (await withSupabaseTimeout(
+      supabase!.from("tourist_profiles").select("*").eq("owner_uid", ownerUid).maybeSingle(),
+      "Supabase tourist passport fetch timed out.",
+    )) as { data: TouristProfileRow | null; error: { message: string } | null };
+    if (error) throw new Error(error.message);
+    if (data) {
+      const passport = supabaseRowToPassport(data);
       savePassportToCache(passport);
       return passport;
     }
-    const cached = loadPassportFromCache(ownerUid);
     if (cached) return cached;
     return null;
   } catch (error) {
     if (isOfflineError(error)) {
-      const cached = loadPassportFromCache(ownerUid);
       if (cached) return cached;
       throw new Error("You are offline. Connect once to load your Profile QR — it will then work offline from cache.");
+    }
+    // For non-offline errors, still return cache if available (transient Supabase error)
+    if (cached) {
+      console.warn("[tourist-passport] Supabase getTouristPassport using cache after error:", error);
+      return cached;
     }
     throw error as Error;
   }
@@ -376,16 +328,16 @@ export async function ensureTouristPassport(
   const existing = await getTouristPassport(ownerUid);
   const normalizedName = displayName.trim();
   const [firstName = "Hilinga User", ...rest] = normalizedName.split(/\s+/).filter(Boolean);
-  // Keep the QR identity synchronized with the signed-in account profile while
-  // also repairing an older or partially-created token lookup document.
   if (existing) {
-    return commitPassport(normalizePassport(ownerUid, {
-      ...existing,
-      ...(normalizedName ? { firstName, lastName: rest.join(" ") } : {}),
-      profilePhoto: profilePhoto || existing.profilePhoto,
-      language: accountProfile.language || existing.language,
-      interests: accountProfile.interests ?? existing.interests,
-    }));
+    return commitPassport(
+      normalizePassport(ownerUid, {
+        ...existing,
+        ...(normalizedName ? { firstName, lastName: rest.join(" ") } : {}),
+        profilePhoto: profilePhoto || existing.profilePhoto,
+        language: accountProfile.language || existing.language,
+        interests: accountProfile.interests ?? existing.interests,
+      }),
+    );
   }
 
   const created = normalizePassport(ownerUid, {
@@ -431,40 +383,20 @@ export function tokenFromTouristQrValue(value: string) {
 }
 
 export async function resolveTouristQr(value: string) {
+  requireSupabase();
   const token = tokenFromTouristQrValue(value);
   if (!/^[A-Za-z0-9]{24,128}$/.test(token)) {
     throw new Error("That QR code does not contain a valid Hilinga profile token.");
   }
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { data: qrData, error: qrError } = (await withSupabaseTimeout(
-        supabase.from("tourist_qr_codes").select("*").eq("qr_token", token).maybeSingle(),
-        "Supabase QR resolve timed out.",
-      )) as { data: TouristQrCodeRow | null; error: { message: string } | null };
-      if (qrError) throw new Error(qrError.message);
-      if (!qrData || qrData.status !== "active") {
-        throw new Error("This Hilinga Profile QR is disabled, expired, or invalid.");
-      }
-      const ownerUid = String(qrData.owner_uid || "");
-      const passport = ownerUid ? await getTouristPassport(ownerUid) : null;
-      if (!passport || passport.qrToken !== token || passport.qrStatus !== "active" || !passport.consentEnabled) {
-        throw new Error("This Profile QR is no longer active.");
-      }
-      return passport;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      // Only fallback for transport/timeout errors; rethrow validation errors directly
-      if (msg.includes("disabled, expired") || msg.includes("no longer active") || msg.includes("valid Hilinga")) {
-        throw error as Error;
-      }
-      console.warn("[tourist-passport] Supabase resolveTouristQr fallback:", error);
-    }
-  }
-  const qrSnapshot = await getDoc(doc(qrCodes, token));
-  if (!qrSnapshot.exists() || qrSnapshot.data().status !== "active") {
+  const { data: qrData, error: qrError } = (await withSupabaseTimeout(
+    supabase!.from("tourist_qr_codes").select("*").eq("qr_token", token).maybeSingle(),
+    "Supabase QR resolve timed out.",
+  )) as { data: TouristQrCodeRow | null; error: { message: string } | null };
+  if (qrError) throw new Error(qrError.message);
+  if (!qrData || qrData.status !== "active") {
     throw new Error("This Hilinga Profile QR is disabled, expired, or invalid.");
   }
-  const ownerUid = String(qrSnapshot.data().ownerUid || "");
+  const ownerUid = String(qrData.owner_uid || "");
   const passport = ownerUid ? await getTouristPassport(ownerUid) : null;
   if (!passport || passport.qrToken !== token || passport.qrStatus !== "active" || !passport.consentEnabled) {
     throw new Error("This Profile QR is no longer active.");
@@ -473,43 +405,25 @@ export async function resolveTouristQr(value: string) {
 }
 
 export async function findRecentTouristVisit(touristId: string, businessId: string) {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const cutoffIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-      const { data, error } = (await withSupabaseTimeout(
-        supabase
-          .from("tourist_visit_logs")
-          .select("*")
-          .eq("business_id", businessId)
-          .eq("tourist_id", touristId)
-          .gte("visited_at", cutoffIso)
-          .order("visited_at", { ascending: false })
-          .limit(10),
-        "Supabase findRecentTouristVisit timed out.",
-      )) as { data: TouristVisitLogRow[] | null; error: { message: string } | null };
-      if (error) throw new Error(error.message);
-      if (data && data.length > 0) {
-        const sorted = data.map(supabaseVisitRowToVisit).sort((a, b) => String(b.visitedAt).localeCompare(String(a.visitedAt)));
-        return sorted[0] || null;
-      }
-      return null;
-    } catch (error) {
-      console.warn("[tourist-passport] Supabase findRecentTouristVisit fallback:", error);
-    }
+  requireSupabase();
+  const cutoffIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const { data, error } = (await withSupabaseTimeout(
+    supabase!
+      .from("tourist_visit_logs")
+      .select("*")
+      .eq("business_id", businessId)
+      .eq("tourist_id", touristId)
+      .gte("visited_at", cutoffIso)
+      .order("visited_at", { ascending: false })
+      .limit(10),
+    "Supabase findRecentTouristVisit timed out.",
+  )) as { data: TouristVisitLogRow[] | null; error: { message: string } | null };
+  if (error) throw new Error(error.message);
+  if (data && data.length > 0) {
+    const sorted = data.map(supabaseVisitRowToVisit).sort((a, b) => String(b.visitedAt).localeCompare(String(a.visitedAt)));
+    return sorted[0] || null;
   }
-  const snapshot = await getDocs(query(
-    visits,
-    where("businessId", "==", businessId),
-    where("touristId", "==", touristId),
-    limit(10),
-  ));
-  const cutoff = Date.now() - 30 * 60 * 1000;
-  const recent = snapshot.docs
-    .map((item) => ({ id: item.id, ...(item.data() as Partial<TouristVisit>) }))
-    .filter((item) => item.touristId === touristId)
-    .filter((item) => item.visitedAt && new Date(item.visitedAt).getTime() >= cutoff)
-    .sort((a, b) => String(b.visitedAt).localeCompare(String(a.visitedAt)))[0];
-  return recent || null;
+  return null;
 }
 
 export async function recordTouristVisit(input: {
@@ -520,6 +434,7 @@ export async function recordTouristVisit(input: {
   scannedBy: string;
   scanMethod: "camera" | "manual";
 }) {
+  requireSupabase();
   const previous = await findRecentTouristVisit(input.passport.ownerUid, input.businessId);
   if (previous) return { visit: previous as TouristVisit, duplicate: true };
   const timestamp = now();
@@ -543,62 +458,31 @@ export async function recordTouristVisit(input: {
   };
   const id = crypto.randomUUID();
 
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const row = {
-        id,
-        business_id: visit.businessId,
-        tourist_id: visit.touristId,
-        tourist_code: visit.touristCode,
-        tourist_name: visit.touristName,
-        tourist_country: visit.touristCountry,
-        tourist_province: visit.touristProvince,
-        user_language: visit.userLanguage,
-        user_interests: visit.userInterests,
-        business_name: visit.businessName,
-        business_location: visit.businessLocation,
-        qr_token: visit.qrToken,
-        scanned_by: visit.scannedBy,
-        visited_at: visit.visitedAt,
-        scan_method: visit.scanMethod,
-        status: visit.status,
-        created_at: visit.createdAt,
-      };
-      const { error } = (await withSupabaseTimeout(
-        supabase.from("tourist_visit_logs").insert(row as never),
-        "Supabase recordTouristVisit timed out.",
-      )) as { error: { message: string } | null };
-      if (error) throw new Error(error.message);
-      return { visit: { id, ...visit }, duplicate: false };
-    } catch (error) {
-      console.warn("[tourist-passport] Supabase recordTouristVisit fallback:", error);
-    }
-  }
-
-  await setDoc(doc(visits, id), visit);
-  return { visit: { id, ...visit }, duplicate: false };
-}
-
-function toVisit(id: string, value: Record<string, unknown>): TouristVisit {
-  return {
+  const row = {
     id,
-    touristId: String(value.touristId || ""),
-    touristCode: String(value.touristCode || ""),
-    touristName: String(value.touristName || ""),
-    touristCountry: String(value.touristCountry || ""),
-    touristProvince: String(value.touristProvince || ""),
-    userLanguage: String(value.userLanguage || "English"),
-    userInterests: Array.isArray(value.userInterests) ? value.userInterests.filter((item): item is string => typeof item === "string") : [],
-    businessId: String(value.businessId || ""),
-    businessName: String(value.businessName || "Hilinga business"),
-    businessLocation: String(value.businessLocation || ""),
-    qrToken: String(value.qrToken || ""),
-    scannedBy: String(value.scannedBy || ""),
-    visitedAt: String(value.visitedAt || value.createdAt || now()),
-    scanMethod: value.scanMethod === "manual" ? "manual" : "camera",
-    status: value.status === "duplicate" ? "duplicate" : "recorded",
-    createdAt: String(value.createdAt || value.visitedAt || now()),
+    business_id: visit.businessId,
+    tourist_id: visit.touristId,
+    tourist_code: visit.touristCode,
+    tourist_name: visit.touristName,
+    tourist_country: visit.touristCountry,
+    tourist_province: visit.touristProvince,
+    user_language: visit.userLanguage,
+    user_interests: visit.userInterests,
+    business_name: visit.businessName,
+    business_location: visit.businessLocation,
+    qr_token: visit.qrToken,
+    scanned_by: visit.scannedBy,
+    visited_at: visit.visitedAt,
+    scan_method: visit.scanMethod,
+    status: visit.status,
+    created_at: visit.createdAt,
   };
+  const { error } = (await withSupabaseTimeout(
+    supabase!.from("tourist_visit_logs").insert(row as never),
+    "Supabase recordTouristVisit timed out.",
+  )) as { error: { message: string } | null };
+  if (error) throw new Error(error.message);
+  return { visit: { id, ...visit }, duplicate: false };
 }
 
 function supabaseSubscribeToBusinessVisits(
@@ -633,13 +517,13 @@ function supabaseSubscribeToBusinessVisits(
   try {
     channel = supabase!
       .channel(`tourist-visits:business:${businessId}:${Math.random().toString(36).slice(2, 8)}`)
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "tourist_visit_logs", filter: `business_id=eq.${businessId}` },
-      () => {
-        void fetchAll();
-      },
-    )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tourist_visit_logs", filter: `business_id=eq.${businessId}` },
+        () => {
+          void fetchAll();
+        },
+      )
       .subscribe((status) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") void fetchAll();
       });
@@ -685,13 +569,13 @@ function supabaseSubscribeToTouristVisits(
   try {
     channel = supabase!
       .channel(`tourist-visits:tourist:${touristId}:${Math.random().toString(36).slice(2, 8)}`)
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "tourist_visit_logs", filter: `tourist_id=eq.${touristId}` },
-      () => {
-        void fetchAll();
-      },
-    )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tourist_visit_logs", filter: `tourist_id=eq.${touristId}` },
+        () => {
+          void fetchAll();
+        },
+      )
       .subscribe((status) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") void fetchAll();
       });
@@ -705,22 +589,22 @@ function supabaseSubscribeToTouristVisits(
   };
 }
 
-export function subscribeToBusinessVisits(businessId: string, onVisits: (items: TouristVisit[]) => void, onError: (error: Error) => void) {
-  if (isSupabaseConfigured && supabase) {
-    return supabaseSubscribeToBusinessVisits(businessId, onVisits, onError);
-  }
-  return onSnapshot(query(visits, where("businessId", "==", businessId), limit(100)), (snapshot) => {
-    onVisits(snapshot.docs.map((item) => toVisit(item.id, item.data())).sort((a, b) => b.visitedAt.localeCompare(a.visitedAt)));
-  }, onError);
+export function subscribeToBusinessVisits(
+  businessId: string,
+  onVisits: (items: TouristVisit[]) => void,
+  onError: (error: Error) => void,
+) {
+  requireSupabase();
+  return supabaseSubscribeToBusinessVisits(businessId, onVisits, onError);
 }
 
-export function subscribeToTouristVisits(touristId: string, onVisits: (items: TouristVisit[]) => void, onError: (error: Error) => void) {
-  if (isSupabaseConfigured && supabase) {
-    return supabaseSubscribeToTouristVisits(touristId, onVisits, onError);
-  }
-  return onSnapshot(query(visits, where("touristId", "==", touristId), limit(100)), (snapshot) => {
-    onVisits(snapshot.docs.map((item) => toVisit(item.id, item.data())).sort((a, b) => b.visitedAt.localeCompare(a.visitedAt)));
-  }, onError);
+export function subscribeToTouristVisits(
+  touristId: string,
+  onVisits: (items: TouristVisit[]) => void,
+  onError: (error: Error) => void,
+) {
+  requireSupabase();
+  return supabaseSubscribeToTouristVisits(touristId, onVisits, onError);
 }
 
 export function touristQrUrl(token: string) {

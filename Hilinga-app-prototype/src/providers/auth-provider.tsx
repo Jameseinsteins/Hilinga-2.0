@@ -21,7 +21,6 @@ import {
 import {
   auth,
   isFirebaseConfigured,
-  isFirebaseStorageEnabled,
 } from "@/lib/firebase";
 import { resolveAccountMode } from "@/lib/account-mode";
 import { hasBusinessPage } from "@/lib/business-content";
@@ -112,7 +111,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         }
       }
       setProfile(nextProfile);
-      if (nextProfile?.avatar_path && isFirebaseStorageEnabled) {
+      if (nextProfile?.avatar_path) {
         try {
           setAvatarUrl(await getAvatarUrl(nextProfile.avatar_path));
         } catch (avatarError) {
@@ -197,14 +196,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
           try {
             let avatarPath = input.avatarPath ?? profile?.avatar_path ?? null;
             let localAvatarUrl = input.avatarSelection?.uri ?? user.photoURL ?? avatarUrl;
-            if (input.avatarSelection && isFirebaseStorageEnabled) {
+            if (input.avatarSelection) {
               try {
                 avatarPath = await uploadAvatar(userId, input.avatarSelection);
               } catch (avatarError) {
                 console.warn("[profile] photo upload unavailable; saving profile without it", avatarError);
               }
-            } else if (input.avatarSelection) {
-              console.info("[profile] cloud photo upload skipped because Firebase Storage is disabled");
             }
 
             // Check if this save was cancelled
@@ -235,7 +232,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
             setProfile(saved);
             setError(null);
 
-            if (saved.avatar_path && isFirebaseStorageEnabled) {
+            if (saved.avatar_path) {
               try {
                 localAvatarUrl = await getAvatarUrl(saved.avatar_path);
               } catch (avatarError) {

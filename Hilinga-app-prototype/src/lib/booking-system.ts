@@ -1,31 +1,18 @@
 /**
  * Booking Management System
- * Extends cloud-user-data with booking operations
- * Offline-first: IndexedDB is source of truth, Supabase-first sync with Firestore fallback (Phase 1)
+ * Supabase-only: IndexedDB is source of truth, Supabase sync (no Firestore fallback)
  */
-
-import {
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  setDoc,
-} from "firebase/firestore";
-
 import type {
   Booking,
   BookingStatus,
   InstallmentSchedule,
-  PaymentMethod,
   PaymentStatus,
   PaymentTransaction,
   PriceBreakdown,
 } from "@/lib/payment-system";
-import { firestore } from "@/lib/firebase";
 import { isSupabaseConfigured, supabase, withSupabaseTimeout } from "@/lib/supabase";
 import type { ItineraryDay } from "@/lib/database";
 
-const FIREBASE_TIMEOUT_MS = 12_000;
 const BOOKINGS_STORE = "user_bookings";
 const PAYMENTS_STORE = "user_payments";
 const ITINERARY_EDITS_STORE = "user_itinerary_edits";
@@ -56,12 +43,10 @@ type CachedItineraryEdit = {
   syncState: SyncState;
 };
 
-function withFirebaseTimeout<T>(operation: Promise<T>, message: string) {
-  let timeout: ReturnType<typeof setTimeout>;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeout = setTimeout(() => reject(new Error(message)), FIREBASE_TIMEOUT_MS);
-  });
-  return Promise.race([operation, timeoutPromise]).finally(() => clearTimeout(timeout));
+function requireSupabase() {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.");
+  }
 }
 
 function deferCloudSync(error: unknown, message: string) {
@@ -124,64 +109,6 @@ async function replaceSyncedRows<T extends { syncState: SyncState }>(
   await transactionDone(transaction);
 }
 
-function bookingsCollection(userId: string) {
-  return collection(firestore, "users", userId, "bookings");
-}
-
-function paymentsCollection(userId: string) {
-  return collection(firestore, "users", userId, "payments");
-}
-
-function itineraryEditsCollection(userId: string) {
-  return collection(firestore, "users", userId, "itineraryEdits");
-}
-
-function bookingDocument(booking: Booking) {
-  return {
-    tripPlanId: booking.tripPlanId,
-    status: booking.status,
-    participants: booking.participants,
-    startDate: booking.startDate,
-    endDate: booking.endDate,
-    pricing: booking.pricing,
-    paymentId: booking.paymentId,
-    paymentStatus: booking.paymentStatus,
-    installments: booking.installments ?? [],
-    confirmationNumber: booking.confirmationNumber,
-    notes: booking.notes,
-    createdAt: booking.createdAt,
-    cancelledAt: booking.cancelledAt,
-  };
-}
-
-function paymentDocument(payment: PaymentTransaction) {
-  return {
-    bookingId: payment.bookingId,
-    amount: payment.amount,
-    currency: payment.currency,
-    status: payment.status,
-    method: payment.method,
-    transactionId: payment.transactionId,
-    receiptUrl: payment.receiptUrl,
-    failureReason: payment.failureReason,
-    retryCount: payment.retryCount,
-    maxRetries: payment.maxRetries,
-    processedAt: payment.processedAt,
-    refundedAt: payment.refundedAt,
-    createdAt: payment.createdAt,
-  };
-}
-
-function itineraryEditDocument(edit: CachedItineraryEdit) {
-  return {
-    bookingId: edit.bookingId,
-    tripPlanId: edit.tripPlanId,
-    insertPosition: edit.insertPosition,
-    newStop: edit.newStop,
-    createdAt: edit.createdAt,
-  };
-}
-
 // ── Supabase converters ──
 
 function toSupabaseBookingRow(row: CachedBooking): Record<string, unknown> {
@@ -238,9 +165,7 @@ function fromSupabaseBookingRow(data: Record<string, unknown>): CachedBooking {
 }
 
 function toSupabasePaymentRow(row: CachedPayment): Record<string, unknown> {
-  // payments.method is TEXT in Supabase schema, store stringified JSON for structured methods
-  const methodValue =
-    typeof row.method === "string" ? row.method : JSON.stringify(row.method);
+  const methodValue = typeof row.method === "string" ? row.method : JSON.stringify(row.method);
   return {
     id: row.id,
     user_id: row.userId,
@@ -271,11 +196,10 @@ function fromSupabasePaymentRow(data: Record<string, unknown>): CachedPayment {
       if (parsed && typeof parsed === "object" && "type" in parsed) {
         methodParsed = parsed as PaymentTransaction["method"];
       } else {
-        // plain string like "card" stored historically
-        methodParsed = { type: rawMethod as PaymentMethod } as PaymentTransaction["method"];
+        methodParsed = { type: rawMethod as unknown as string } as PaymentTransaction["method"];
       }
     } catch {
-      methodParsed = { type: rawMethod as PaymentMethod } as PaymentTransaction["method"];
+      methodParsed = { type: rawMethod as unknown as string } as PaymentTransaction["method"];
     }
   } else if (rawMethod && typeof rawMethod === "object") {
     methodParsed = rawMethod as PaymentTransaction["method"];
@@ -332,179 +256,76 @@ function fromSupabaseItineraryEditRow(data: Record<string, unknown>): CachedItin
 }
 
 async function flushBookingRow(db: IDBDatabase, row: CachedBooking) {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      if (row.deleted) {
-        const { error } = await withSupabaseTimeout(
-          supabase.from("bookings").delete().eq("user_id", row.userId).eq("id", row.id),
-          "Booking sync timed out.",
-        );
-        if (error) throw new Error(error.message);
-      } else {
-        const { error } = await withSupabaseTimeout(
-          supabase.from("bookings").upsert(toSupabaseBookingRow(row) as never, { onConflict: "user_id,id" }),
-          "Booking sync timed out.",
-        );
-        if (error) throw new Error(error.message);
-      }
-      if (row.deleted) await deleteRow(db, BOOKINGS_STORE, row.userId, row.id);
-      else await putRow(db, BOOKINGS_STORE, { ...row, syncState: "synced" });
-      return;
-    } catch (error) {
-      console.warn("[booking-system] Supabase booking sync failed, trying Firestore:", error);
-      try {
-        const reference = doc(bookingsCollection(row.userId), row.id);
-        await withFirebaseTimeout(
-          row.deleted ? deleteDoc(reference) : setDoc(reference, bookingDocument(row)),
-          "Booking sync timed out.",
-        );
-        if (row.deleted) await deleteRow(db, BOOKINGS_STORE, row.userId, row.id);
-        else await putRow(db, BOOKINGS_STORE, { ...row, syncState: "synced" });
-        return;
-      } catch (fallbackError) {
-        throw fallbackError;
-      }
-    }
+  requireSupabase();
+  if (row.deleted) {
+    const { error } = await withSupabaseTimeout(
+      supabase!.from("bookings").delete().eq("user_id", row.userId).eq("id", row.id),
+      "Booking sync timed out.",
+    );
+    if (error) throw new Error(error.message);
+  } else {
+    const { error } = await withSupabaseTimeout(
+      supabase!.from("bookings").upsert(toSupabaseBookingRow(row) as never, { onConflict: "user_id,id" }),
+      "Booking sync timed out.",
+    );
+    if (error) throw new Error(error.message);
   }
-
-  const reference = doc(bookingsCollection(row.userId), row.id);
-  await withFirebaseTimeout(
-    row.deleted ? deleteDoc(reference) : setDoc(reference, bookingDocument(row)),
-    "Booking sync timed out.",
-  );
   if (row.deleted) await deleteRow(db, BOOKINGS_STORE, row.userId, row.id);
   else await putRow(db, BOOKINGS_STORE, { ...row, syncState: "synced" });
 }
 
 async function flushPaymentRow(db: IDBDatabase, row: CachedPayment) {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { error } = await withSupabaseTimeout(
-        supabase.from("payments").upsert(toSupabasePaymentRow(row) as never, { onConflict: "user_id,id" }),
-        "Payment sync timed out.",
-      );
-      if (error) throw new Error(error.message);
-      await putRow(db, PAYMENTS_STORE, { ...row, syncState: "synced" });
-      return;
-    } catch (error) {
-      console.warn("[booking-system] Supabase payment sync failed, trying Firestore:", error);
-      try {
-        const reference = doc(paymentsCollection(row.userId), row.id);
-        await withFirebaseTimeout(
-          setDoc(reference, paymentDocument(row)),
-          "Payment sync timed out.",
-        );
-        await putRow(db, PAYMENTS_STORE, { ...row, syncState: "synced" });
-        return;
-      } catch (fallbackError) {
-        throw fallbackError;
-      }
-    }
-  }
-
-  const reference = doc(paymentsCollection(row.userId), row.id);
-  await withFirebaseTimeout(
-    setDoc(reference, paymentDocument(row)),
+  requireSupabase();
+  const { error } = await withSupabaseTimeout(
+    supabase!.from("payments").upsert(toSupabasePaymentRow(row) as never, { onConflict: "user_id,id" }),
     "Payment sync timed out.",
   );
+  if (error) throw new Error(error.message);
   await putRow(db, PAYMENTS_STORE, { ...row, syncState: "synced" });
 }
 
 async function flushItineraryEditRow(db: IDBDatabase, row: CachedItineraryEdit) {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { error } = await withSupabaseTimeout(
-        supabase.from("itinerary_edits").upsert(toSupabaseItineraryEditRow(row) as never, { onConflict: "id" }),
-        "Itinerary edit sync timed out.",
-      );
-      if (error) throw new Error(error.message);
-      await putRow(db, ITINERARY_EDITS_STORE, { ...row, syncState: "synced" });
-      return;
-    } catch (error) {
-      console.warn("[booking-system] Supabase itinerary-edit sync failed, trying Firestore:", error);
-      try {
-        const reference = doc(itineraryEditsCollection(row.userId), row.id);
-        await withFirebaseTimeout(
-          setDoc(reference, itineraryEditDocument(row)),
-          "Itinerary edit sync timed out.",
-        );
-        await putRow(db, ITINERARY_EDITS_STORE, { ...row, syncState: "synced" });
-        return;
-      } catch (fallbackError) {
-        throw fallbackError;
-      }
-    }
-  }
-
-  const reference = doc(itineraryEditsCollection(row.userId), row.id);
-  await withFirebaseTimeout(
-    setDoc(reference, itineraryEditDocument(row)),
+  requireSupabase();
+  const { error } = await withSupabaseTimeout(
+    supabase!.from("itinerary_edits").upsert(toSupabaseItineraryEditRow(row) as never, { onConflict: "id" }),
     "Itinerary edit sync timed out.",
   );
+  if (error) throw new Error(error.message);
   await putRow(db, ITINERARY_EDITS_STORE, { ...row, syncState: "synced" });
 }
 
 async function tryFlush<T>(rows: T[], flush: (row: T) => Promise<void>) {
-  await Promise.all(rows.map(async (row) => {
-    try {
-      await flush(row);
-    } catch (error) {
-      deferCloudSync(error, "[booking-system] Cloud sync deferred; local data retained.");
-    }
-  }));
+  await Promise.all(
+    rows.map(async (row) => {
+      try {
+        await flush(row);
+      } catch (error) {
+        deferCloudSync(error, "[booking-system] Cloud sync deferred; local data retained.");
+      }
+    }),
+  );
 }
 
 // ── Booking Operations ──
 
 export async function getBookings(db: IDBDatabase, userId: string): Promise<Booking[]> {
+  requireSupabase();
   const cached = await userRows<CachedBooking>(db, BOOKINGS_STORE, userId);
-  await tryFlush(cached.filter((row) => row.syncState === "pending"), (row) => flushBookingRow(db, row));
+  await tryFlush(
+    cached.filter((row) => row.syncState === "pending"),
+    (row) => flushBookingRow(db, row),
+  );
 
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { data, error } = await withSupabaseTimeout(
-        supabase.from("bookings").select("*").eq("user_id", userId),
-        "Bookings are taking too long to load.",
-      );
-      if (error) throw new Error(error.message);
-      const remote = (data as Record<string, unknown>[] | null ?? []).map(fromSupabaseBookingRow);
-      await replaceSyncedRows(db, BOOKINGS_STORE, userId, remote);
-    } catch (error) {
-      console.warn("[booking-system] Supabase bookings fetch failed, trying Firestore:", error);
-      try {
-        const snapshot = await withFirebaseTimeout(
-          getDocs(bookingsCollection(userId)),
-          "Bookings are taking too long to load.",
-        );
-        const remote = snapshot.docs.map((item) => ({
-          ...(item.data() as Omit<Booking, "id" | "userId">),
-          id: item.id,
-          userId,
-          updatedAt: (item.data().updatedAt as string) ?? (item.data().createdAt as string),
-          syncState: "synced" as const,
-        }));
-        await replaceSyncedRows(db, BOOKINGS_STORE, userId, remote as unknown as CachedBooking[]);
-      } catch (fallbackError) {
-        deferCloudSync(fallbackError, "[booking-system] Using cached bookings.");
-      }
-    }
-  } else {
-    try {
-      const snapshot = await withFirebaseTimeout(
-        getDocs(bookingsCollection(userId)),
-        "Bookings are taking too long to load.",
-      );
-      const remote = snapshot.docs.map((item) => ({
-        ...(item.data() as Omit<Booking, "id" | "userId">),
-        id: item.id,
-        userId,
-        updatedAt: (item.data().updatedAt as string) ?? (item.data().createdAt as string),
-        syncState: "synced" as const,
-      }));
-      await replaceSyncedRows(db, BOOKINGS_STORE, userId, remote as unknown as CachedBooking[]);
-    } catch (error) {
-      deferCloudSync(error, "[booking-system] Using cached bookings.");
-    }
+  try {
+    const { data, error } = await withSupabaseTimeout(
+      supabase!.from("bookings").select("*").eq("user_id", userId),
+      "Bookings are taking too long to load.",
+    );
+    if (error) throw new Error(error.message);
+    const remote = ((data as Record<string, unknown>[] | null) ?? []).map(fromSupabaseBookingRow);
+    await replaceSyncedRows(db, BOOKINGS_STORE, userId, remote);
+  } catch (error) {
+    deferCloudSync(error, "[booking-system] Using cached bookings.");
   }
 
   return (await userRows<CachedBooking>(db, BOOKINGS_STORE, userId))
@@ -522,6 +343,7 @@ export async function createBooking(
   pricing: PriceBreakdown,
   confirmationNumber: string,
 ): Promise<Booking> {
+  requireSupabase();
   const now = new Date().toISOString();
   const booking: Booking = {
     id: `booking-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -560,6 +382,7 @@ export async function updateBookingStatus(
   status: BookingStatus,
   paymentStatus?: PaymentStatus,
 ): Promise<void> {
+  requireSupabase();
   const bookings = await userRows<CachedBooking>(db, BOOKINGS_STORE, userId);
   const existing = bookings.find((b) => b.id === bookingId);
   if (!existing) throw new Error("Booking not found");
@@ -581,7 +404,6 @@ export async function updateBookingStatus(
   }
 }
 
-// Back-compat alias: some call sites import `updateBooking`; keep both names
 export const updateBooking = updateBookingStatus;
 
 export async function addInstallmentSchedule(
@@ -590,6 +412,7 @@ export async function addInstallmentSchedule(
   bookingId: string,
   installments: InstallmentSchedule[],
 ): Promise<void> {
+  requireSupabase();
   const bookings = await userRows<CachedBooking>(db, BOOKINGS_STORE, userId);
   const existing = bookings.find((b) => b.id === bookingId);
   if (!existing) throw new Error("Booking not found");
@@ -610,11 +433,8 @@ export async function addInstallmentSchedule(
   }
 }
 
-export async function cancelBooking(
-  db: IDBDatabase,
-  userId: string,
-  bookingId: string,
-): Promise<void> {
+export async function cancelBooking(db: IDBDatabase, userId: string, bookingId: string): Promise<void> {
+  requireSupabase();
   const bookings = await userRows<CachedBooking>(db, BOOKINGS_STORE, userId);
   const existing = bookings.find((b) => b.id === bookingId);
   if (!existing) throw new Error("Booking not found");
@@ -639,63 +459,32 @@ export async function cancelBooking(
 // ── Payment Operations ──
 
 export async function getPayments(db: IDBDatabase, userId: string): Promise<PaymentTransaction[]> {
+  requireSupabase();
   const cached = await userRows<CachedPayment>(db, PAYMENTS_STORE, userId);
-  await tryFlush(cached.filter((row) => row.syncState === "pending"), (row) => flushPaymentRow(db, row));
+  await tryFlush(
+    cached.filter((row) => row.syncState === "pending"),
+    (row) => flushPaymentRow(db, row),
+  );
 
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { data, error } = await withSupabaseTimeout(
-        supabase.from("payments").select("*").eq("user_id", userId),
-        "Payments are taking too long to load.",
-      );
-      if (error) throw new Error(error.message);
-      const remote = (data as Record<string, unknown>[] | null ?? []).map(fromSupabasePaymentRow);
-      await replaceSyncedRows(db, PAYMENTS_STORE, userId, remote);
-    } catch (error) {
-      console.warn("[booking-system] Supabase payments fetch failed, trying Firestore:", error);
-      try {
-        const snapshot = await withFirebaseTimeout(
-          getDocs(paymentsCollection(userId)),
-          "Payments are taking too long to load.",
-        );
-        const remote = snapshot.docs.map((item) => ({
-          ...(item.data() as Omit<PaymentTransaction, "id" | "userId">),
-          id: item.id,
-          userId,
-          syncState: "synced" as const,
-        }));
-        await replaceSyncedRows(db, PAYMENTS_STORE, userId, remote as unknown as CachedPayment[]);
-      } catch (fallbackError) {
-        deferCloudSync(fallbackError, "[booking-system] Using cached payments.");
-      }
-    }
-  } else {
-    try {
-      const snapshot = await withFirebaseTimeout(
-        getDocs(paymentsCollection(userId)),
-        "Payments are taking too long to load.",
-      );
-      const remote = snapshot.docs.map((item) => ({
-        ...(item.data() as Omit<PaymentTransaction, "id" | "userId">),
-        id: item.id,
-        userId,
-        syncState: "synced" as const,
-      }));
-      await replaceSyncedRows(db, PAYMENTS_STORE, userId, remote as unknown as CachedPayment[]);
-    } catch (error) {
-      deferCloudSync(error, "[booking-system] Using cached payments.");
-    }
+  try {
+    const { data, error } = await withSupabaseTimeout(
+      supabase!.from("payments").select("*").eq("user_id", userId),
+      "Payments are taking too long to load.",
+    );
+    if (error) throw new Error(error.message);
+    const remote = ((data as Record<string, unknown>[] | null) ?? []).map(fromSupabasePaymentRow);
+    await replaceSyncedRows(db, PAYMENTS_STORE, userId, remote);
+  } catch (error) {
+    deferCloudSync(error, "[booking-system] Using cached payments.");
   }
 
-  return (await userRows<CachedPayment>(db, PAYMENTS_STORE, userId))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return (await userRows<CachedPayment>(db, PAYMENTS_STORE, userId)).sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt),
+  );
 }
 
-export async function recordPayment(
-  db: IDBDatabase,
-  userId: string,
-  payment: PaymentTransaction,
-): Promise<void> {
+export async function recordPayment(db: IDBDatabase, userId: string, payment: PaymentTransaction): Promise<void> {
+  requireSupabase();
   const row: CachedPayment = {
     ...payment,
     userId,
@@ -729,6 +518,7 @@ export async function insertItineraryStop(
   position: number,
   newStop: ItineraryDay,
 ): Promise<string> {
+  requireSupabase();
   const now = new Date().toISOString();
   const editId = `edit-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -755,7 +545,6 @@ export async function insertItineraryStop(
   return editId;
 }
 
-// Back-compat alias for task wording `addItineraryEdit`
 export const addItineraryEdit = insertItineraryStop;
 
 export async function getItineraryEdits(
@@ -763,79 +552,32 @@ export async function getItineraryEdits(
   userId: string,
   bookingId: string,
 ): Promise<CachedItineraryEdit[]> {
+  requireSupabase();
   const cached = await userRows<CachedItineraryEdit>(db, ITINERARY_EDITS_STORE, userId);
-  await tryFlush(cached.filter((row) => row.syncState === "pending"), (row) => flushItineraryEditRow(db, row));
+  await tryFlush(
+    cached.filter((row) => row.syncState === "pending"),
+    (row) => flushItineraryEditRow(db, row),
+  );
 
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { data, error } = await withSupabaseTimeout(
-        supabase.from("itinerary_edits").select("*").eq("user_id", userId),
-        "Itinerary edits are taking too long to load.",
-      );
-      if (error) throw new Error(error.message);
-      const remote = (data as Record<string, unknown>[] | null ?? []).map(fromSupabaseItineraryEditRow);
-      // Replace synced rows for this user (deletes all + restores pending), then filter by bookingId in memory
-      await replaceSyncedRows(db, ITINERARY_EDITS_STORE, userId, remote);
-    } catch (error) {
-      console.warn("[booking-system] Supabase itinerary-edits fetch failed, trying Firestore:", error);
-      try {
-        const snapshot = await withFirebaseTimeout(
-          getDocs(itineraryEditsCollection(userId)),
-          "Itinerary edits are taking too long to load.",
-        );
-        const remote = snapshot.docs.map((item) => ({
-          ...(item.data() as {
-            bookingId: string;
-            tripPlanId: string;
-            insertPosition: number;
-            newStop: ItineraryDay;
-            createdAt: string;
-          }),
-          id: item.id,
-          userId,
-          updatedAt: (item.data().createdAt as string) ?? new Date().toISOString(),
-          syncState: "synced" as const,
-        }));
-        await replaceSyncedRows(db, ITINERARY_EDITS_STORE, userId, remote as unknown as CachedItineraryEdit[]);
-      } catch (fallbackError) {
-        deferCloudSync(fallbackError, "[booking-system] Using cached itinerary edits.");
-      }
-    }
-  } else {
-    try {
-      const snapshot = await withFirebaseTimeout(
-        getDocs(itineraryEditsCollection(userId)),
-        "Itinerary edits are taking too long to load.",
-      );
-      const remote = snapshot.docs.map((item) => ({
-        ...(item.data() as {
-          bookingId: string;
-          tripPlanId: string;
-          insertPosition: number;
-          newStop: ItineraryDay;
-          createdAt: string;
-        }),
-        id: item.id,
-        userId,
-        updatedAt: (item.data().createdAt as string) ?? new Date().toISOString(),
-        syncState: "synced" as const,
-      }));
-      await replaceSyncedRows(db, ITINERARY_EDITS_STORE, userId, remote as unknown as CachedItineraryEdit[]);
-    } catch (error) {
-      deferCloudSync(error, "[booking-system] Using cached itinerary edits.");
-    }
+  try {
+    const { data, error } = await withSupabaseTimeout(
+      supabase!.from("itinerary_edits").select("*").eq("user_id", userId),
+      "Itinerary edits are taking too long to load.",
+    );
+    if (error) throw new Error(error.message);
+    const remote = ((data as Record<string, unknown>[] | null) ?? []).map(fromSupabaseItineraryEditRow);
+    await replaceSyncedRows(db, ITINERARY_EDITS_STORE, userId, remote);
+  } catch (error) {
+    deferCloudSync(error, "[booking-system] Using cached itinerary edits.");
   }
 
   const edits = await userRows<CachedItineraryEdit>(db, ITINERARY_EDITS_STORE, userId);
-  return edits
-    .filter((e) => e.bookingId === bookingId)
-    .sort((a, b) => a.insertPosition - b.insertPosition);
+  return edits.filter((e) => e.bookingId === bookingId).sort((a, b) => a.insertPosition - b.insertPosition);
 }
 
 // ── Database Schema Setup ──
 
 export function setupBookingTables(db: IDBDatabase) {
-
   if (!db.objectStoreNames.contains(BOOKINGS_STORE)) {
     const store = db.createObjectStore(BOOKINGS_STORE, {
       keyPath: ["userId", "id"],

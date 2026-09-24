@@ -13,8 +13,7 @@ import {
   validateStopInsertion,
   type InsertionResult,
 } from '@/lib/itinerary-utils';
-import { firestore as db } from '@/lib/firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { isSupabaseConfigured, supabase, withSupabaseTimeout } from '@/lib/supabase';
 
 // ============================================================================
 // Types & Interfaces
@@ -278,11 +277,16 @@ export function useItineraryEditor(): [EditState, EditorActions] {
   }, []);
 
   /**
-   * Commit changes to Firestore
+   * Commit changes — Supabase trip_plans itinerary patch (no Firestore)
+   * Fetches the current trip_plans row, replaces itinerary[day-1], and upserts via Supabase.
    */
   const commitChanges = useCallback(
     async (userId: string, tripPlanId: string): Promise<boolean> => {
       if (!state.pendingChanges || !state.targetDay) {
+        return false;
+      }
+      if (!isSupabaseConfigured || !supabase) {
+        console.error('[useItineraryEditor] Supabase is not configured.');
         return false;
       }
 
@@ -294,17 +298,36 @@ export function useItineraryEditor(): [EditState, EditorActions] {
       commitAbortRef.current = new AbortController();
 
       try {
-        // Update Firestore
-        const tripRef = doc(db, `users/${userId}/trips`, tripPlanId);
-
-        // Build the updated itinerary
-        // In a real app, you'd fetch the full trip, update the specific day, and save
-        const updates = {
-          [`itinerary.${state.targetDay.day - 1}`]: state.pendingChanges,
-          updatedAt: Date.now(),
+        // Fetch the current trip_plans row, replace itinerary[day-1], upsert on (user_id,id)
+        const { data, error: fetchError } = await withSupabaseTimeout(
+          supabase.from('trip_plans').select('itinerary, title, preferences').eq('user_id', userId).eq('id', tripPlanId).maybeSingle(),
+          'Supabase trip_plans fetch timed out.',
+        );
+        if (fetchError) throw new Error(fetchError.message);
+        // If row missing, create a minimal one using pending day (covers legacy useItineraryEditor demo paths)
+        const currentItinerary: unknown[] = Array.isArray((data as Record<string, unknown> | null)?.itinerary)
+          ? ((data as Record<string, unknown>).itinerary as unknown[])
+          : [];
+        const nextItinerary = [...currentItinerary];
+        // Fill gaps if day index beyond length
+        while (nextItinerary.length < state.targetDay.day) nextItinerary.push(null);
+        nextItinerary[state.targetDay.day - 1] = state.pendingChanges;
+        const nowIso = new Date().toISOString();
+        const row: Record<string, unknown> = {
+          id: tripPlanId,
+          user_id: userId,
+          title: (data as Record<string, unknown> | null)?.title ?? state.targetDay.title ?? 'Trip',
+          preferences: (data as Record<string, unknown> | null)?.preferences ?? null,
+          itinerary: nextItinerary as unknown,
+          updated_at: nowIso,
         };
-
-        await updateDoc(tripRef, updates);
+        // Ensure created_at is set on insert
+        if (!(data as Record<string, unknown> | null)?.title) row.created_at = nowIso;
+        const { error: upsertError } = await withSupabaseTimeout(
+          supabase.from('trip_plans').upsert(row as never, { onConflict: 'user_id,id' }),
+          'Supabase trip_plans upsert timed out.',
+        );
+        if (upsertError) throw new Error(upsertError.message);
 
         // Clear edit state
         setState(createInitialEditState());

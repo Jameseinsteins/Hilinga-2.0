@@ -1,19 +1,12 @@
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  Timestamp,
-  type Unsubscribe,
-} from "firebase/firestore";
-
-import { firestore } from "@/lib/firebase";
 import { isSupabaseConfigured, supabase, withSupabaseTimeout } from "@/lib/supabase";
+export type Unsubscribe = () => void;
+
+export class Timestamp {
+  constructor(public seconds: number, public nanoseconds: number) {}
+  static fromDate(d: Date) { return new Timestamp(Math.floor(d.getTime()/1000), (d.getTime()%1000)*1e6); }
+  toDate() { return new Date(this.seconds*1000 + this.nanoseconds/1e6); }
+  toMillis() { return this.seconds*1000 + this.nanoseconds/1e6; }
+}
 
 export const experienceCategories = [
   "Place",
@@ -52,7 +45,11 @@ export type NewCommunityPost = Pick<
   | "rating"
 >;
 
-const postsCollection = collection(firestore, "communityPosts");
+function requireSupabase() {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.");
+  }
+}
 
 type SupabaseCommunityRow = {
   id: string;
@@ -112,13 +109,13 @@ function supabaseSubscribeToCommunityPosts(
   try {
     channel = supabase!
       .channel(`community-posts:all:${Math.random().toString(36).slice(2, 8)}`)
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "community_posts" },
-      () => {
-        void fetchAll();
-      },
-    )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "community_posts" },
+        () => {
+          void fetchAll();
+        },
+      )
       .subscribe((status) => {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") void fetchAll();
       });
@@ -161,50 +158,16 @@ export function subscribeToCommunityPosts(
   onPosts: (posts: CommunityPost[]) => void,
   onError: (error: Error) => void,
 ): Unsubscribe {
-  if (isSupabaseConfigured && supabase) {
-    return supabaseSubscribeToCommunityPosts(onPosts, onError);
-  }
-  const postsQuery = query(postsCollection, orderBy("createdAt", "desc"), limit(100));
-  return onSnapshot(
-    postsQuery,
-    (snapshot) => {
-      onPosts(
-        snapshot.docs.map((snapshotDoc) => ({
-          ...(snapshotDoc.data() as Omit<CommunityPost, "id">),
-          id: snapshotDoc.id,
-        })),
-      );
-    },
-    onError,
-  );
+  requireSupabase();
+  return supabaseSubscribeToCommunityPosts(onPosts, onError);
 }
 
 export async function createCommunityPost(input: NewCommunityPost) {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      await supabaseCreateCommunityPost(input);
-      return;
-    } catch (error) {
-      console.warn("[community-feed] Supabase create failed, falling back:", error);
-    }
-  }
-  await addDoc(postsCollection, {
-    ...input,
-    placeName: input.placeName.trim(),
-    location: input.location.trim(),
-    experience: input.experience.trim(),
-    createdAt: serverTimestamp(),
-  });
+  requireSupabase();
+  await supabaseCreateCommunityPost(input);
 }
 
 export async function deleteCommunityPost(postId: string) {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      await supabaseDeleteCommunityPost(postId);
-      return;
-    } catch (error) {
-      console.warn("[community-feed] Supabase delete failed, falling back:", error);
-    }
-  }
-  await deleteDoc(doc(postsCollection, postId));
+  requireSupabase();
+  await supabaseDeleteCommunityPost(postId);
 }

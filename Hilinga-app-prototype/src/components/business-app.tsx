@@ -293,7 +293,7 @@ export function BusinessApp() {
       setEditPageOpen(false);
     } catch (error) {
       console.error("[business-pages] Save failed:", error);
-      setPageError(error instanceof Error ? error.message : "This business page could not be synced. Check your connection and Firestore permissions.");
+      setPageError(error instanceof Error ? error.message : "This business page could not be synced. Check your connection.");
     } finally {
       setPageSaving(false);
     }

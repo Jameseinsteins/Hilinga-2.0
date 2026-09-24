@@ -1,21 +1,6 @@
-import {
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  setDoc,
-} from "firebase/firestore";
-
-import type {
-  ItineraryDay,
-  SavedItem,
-  SavedKind,
-  TripPlan,
-} from "@/lib/database";
-import { firestore } from "@/lib/firebase";
+import type { ItineraryDay, SavedItem, SavedKind, TripPlan } from "@/lib/database";
 import { isSupabaseConfigured, supabase, withSupabaseTimeout } from "@/lib/supabase";
 
-const FIREBASE_TIMEOUT_MS = 12_000;
 const LEGACY_OWNER_KEY = "legacy_cloud_data_owner";
 const SAVED_STORE = "user_saved_items";
 const TRIPS_STORE = "user_trip_plans";
@@ -34,19 +19,13 @@ type CachedTripPlan = TripPlan & {
   deleted?: boolean;
 };
 
-function withFirebaseTimeout<T>(operation: Promise<T>, message: string) {
-  let timeout: ReturnType<typeof setTimeout>;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeout = setTimeout(() => reject(new Error(message)), FIREBASE_TIMEOUT_MS);
-  });
-  return Promise.race([operation, timeoutPromise]).finally(() => clearTimeout(timeout));
+function requireSupabase() {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.");
+  }
 }
 
 function deferCloudSync(error: unknown, message: string) {
-  // IndexedDB is the source of truth for this offline-first repository. Once a
-  // local operation succeeds, a Firestore outage or rules/configuration issue
-  // must not make the UI report that the user's change was lost. Pending rows
-  // are retried the next time saved data is loaded.
   console.warn(message, error);
 }
 
@@ -77,12 +56,7 @@ async function putRow(db: IDBDatabase, storeName: string, row: unknown) {
   await transactionDone(transaction);
 }
 
-async function deleteRow(
-  db: IDBDatabase,
-  storeName: string,
-  userId: string,
-  id: string,
-) {
+async function deleteRow(db: IDBDatabase, storeName: string, userId: string, id: string) {
   const transaction = db.transaction(storeName, "readwrite");
   transaction.objectStore(storeName).delete([userId, id]);
   await transactionDone(transaction);
@@ -94,9 +68,9 @@ async function replaceSyncedRows(
   userId: string,
   remoteRows: Array<CachedSavedItem | CachedTripPlan>,
 ) {
-  const pending = (await userRows<CachedSavedItem | CachedTripPlan>(db, storeName, userId))
-    .filter((row) => row.syncState === "pending");
-
+  const pending = (await userRows<CachedSavedItem | CachedTripPlan>(db, storeName, userId)).filter(
+    (row) => row.syncState === "pending",
+  );
   const transaction = db.transaction(storeName, "readwrite");
   const store = transaction.objectStore(storeName);
   const cursorRequest = store.index("by_user").openKeyCursor(IDBKeyRange.only(userId));
@@ -123,76 +97,45 @@ function legacyRows<T>(db: IDBDatabase, storeName: string) {
 function migrateLegacyData(db: IDBDatabase, userId: string) {
   const existing = migrationPromises.get(userId);
   if (existing) return existing;
-
   const migration = (async () => {
     const [legacySaved, legacyTrips] = await Promise.all([
       legacyRows<SavedItem>(db, "saved_items"),
       legacyRows<Array<Omit<TripPlan, "id"> & { id: number | string }>[number]>(db, "trip_plans"),
     ]);
-    const transaction = db.transaction(
-      ["app_settings", SAVED_STORE, TRIPS_STORE],
-      "readwrite",
-    );
+    const transaction = db.transaction(["app_settings", SAVED_STORE, TRIPS_STORE], "readwrite");
     const settings = transaction.objectStore("app_settings");
     const ownerRequest = settings.get(LEGACY_OWNER_KEY);
     ownerRequest.onsuccess = () => {
       if (ownerRequest.result) return;
-
       const now = new Date().toISOString();
       const savedStore = transaction.objectStore(SAVED_STORE);
       const tripStore = transaction.objectStore(TRIPS_STORE);
-
-      legacySaved.forEach((item) => savedStore.put({
-        ...item,
-        userId,
-        updatedAt: item.createdAt || now,
-        syncState: "pending",
-      } satisfies CachedSavedItem));
-      legacyTrips.forEach((plan) => tripStore.put({
-        ...plan,
-        id: String(plan.id).startsWith("legacy-") ? String(plan.id) : `legacy-${plan.id}`,
-        userId,
-        updatedAt: plan.createdAt || now,
-        syncState: "pending",
-      } satisfies CachedTripPlan));
+      legacySaved.forEach((item) =>
+        savedStore.put({
+          ...item,
+          userId,
+          updatedAt: item.createdAt || now,
+          syncState: "pending",
+        } satisfies CachedSavedItem),
+      );
+      legacyTrips.forEach((plan) =>
+        tripStore.put({
+          ...plan,
+          id: String(plan.id).startsWith("legacy-") ? String(plan.id) : `legacy-${plan.id}`,
+          userId,
+          updatedAt: plan.createdAt || now,
+          syncState: "pending",
+        } satisfies CachedTripPlan),
+      );
       settings.put({ key: LEGACY_OWNER_KEY, value: userId });
     };
-
     await transactionDone(transaction);
   })().catch((error) => {
     migrationPromises.delete(userId);
     throw error;
   });
-
   migrationPromises.set(userId, migration);
   return migration;
-}
-
-function savedCollection(userId: string) {
-  return collection(firestore, "users", userId, "savedPlaces");
-}
-
-function tripsCollection(userId: string) {
-  return collection(firestore, "users", userId, "tripPlans");
-}
-
-function savedDocument(item: SavedItem) {
-  return {
-    title: item.title,
-    subtitle: item.subtitle,
-    kind: item.kind,
-    imageKey: item.imageKey,
-    createdAt: item.createdAt,
-  };
-}
-
-function tripDocument(plan: TripPlan) {
-  return {
-    title: plan.title,
-    preferences: plan.preferences,
-    itinerary: plan.itinerary ?? [],
-    createdAt: plan.createdAt,
-  };
 }
 
 // ── Supabase converters ──
@@ -262,164 +205,74 @@ function fromSupabaseTripRow(data: Record<string, unknown>): CachedTripPlan {
 }
 
 async function flushSavedRow(db: IDBDatabase, row: CachedSavedItem) {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      if (row.deleted) {
-        const { error } = await withSupabaseTimeout(
-          supabase.from("saved_places").delete().eq("user_id", row.userId).eq("id", row.id),
-          "Saved-place sync timed out.",
-        );
-        if (error) throw new Error(error.message);
-      } else {
-        const { error } = await withSupabaseTimeout(
-          supabase.from("saved_places").upsert(toSupabaseSavedRow(row) as never, { onConflict: "user_id,id" }),
-          "Saved-place sync timed out.",
-        );
-        if (error) throw new Error(error.message);
-      }
-      if (row.deleted) await deleteRow(db, SAVED_STORE, row.userId, row.id);
-      else await putRow(db, SAVED_STORE, { ...row, syncState: "synced" });
-      return;
-    } catch (error) {
-      console.warn("[cloud-user-data] Supabase saved-place sync failed, trying Firestore:", error);
-      // fall through to Firestore fallback; if Firestore also fails the caller (tryFlush) will defer
-      try {
-        const reference = doc(savedCollection(row.userId), row.id);
-        await withFirebaseTimeout(
-          row.deleted ? deleteDoc(reference) : setDoc(reference, savedDocument(row)),
-          "Saved-place sync timed out.",
-        );
-        if (row.deleted) await deleteRow(db, SAVED_STORE, row.userId, row.id);
-        else await putRow(db, SAVED_STORE, { ...row, syncState: "synced" });
-        return;
-      } catch (fallbackError) {
-        throw fallbackError;
-      }
-    }
+  requireSupabase();
+  if (row.deleted) {
+    const { error } = await withSupabaseTimeout(
+      supabase!.from("saved_places").delete().eq("user_id", row.userId).eq("id", row.id),
+      "Saved-place sync timed out.",
+    );
+    if (error) throw new Error(error.message);
+  } else {
+    const { error } = await withSupabaseTimeout(
+      supabase!.from("saved_places").upsert(toSupabaseSavedRow(row) as never, { onConflict: "user_id,id" }),
+      "Saved-place sync timed out.",
+    );
+    if (error) throw new Error(error.message);
   }
-
-  const reference = doc(savedCollection(row.userId), row.id);
-  await withFirebaseTimeout(
-    row.deleted ? deleteDoc(reference) : setDoc(reference, savedDocument(row)),
-    "Saved-place sync timed out.",
-  );
   if (row.deleted) await deleteRow(db, SAVED_STORE, row.userId, row.id);
   else await putRow(db, SAVED_STORE, { ...row, syncState: "synced" });
 }
 
 async function flushTripRow(db: IDBDatabase, row: CachedTripPlan) {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      if (row.deleted) {
-        const { error } = await withSupabaseTimeout(
-          supabase.from("trip_plans").delete().eq("user_id", row.userId).eq("id", row.id),
-          "Trip-plan sync timed out.",
-        );
-        if (error) throw new Error(error.message);
-      } else {
-        const { error } = await withSupabaseTimeout(
-          supabase.from("trip_plans").upsert(toSupabaseTripRow(row) as never, { onConflict: "user_id,id" }),
-          "Trip-plan sync timed out.",
-        );
-        if (error) throw new Error(error.message);
-      }
-      if (row.deleted) await deleteRow(db, TRIPS_STORE, row.userId, row.id);
-      else await putRow(db, TRIPS_STORE, { ...row, syncState: "synced" });
-      return;
-    } catch (error) {
-      console.warn("[cloud-user-data] Supabase trip-plan sync failed, trying Firestore:", error);
-      try {
-        const reference = doc(tripsCollection(row.userId), row.id);
-        await withFirebaseTimeout(
-          row.deleted ? deleteDoc(reference) : setDoc(reference, tripDocument(row)),
-          "Trip-plan sync timed out.",
-        );
-        if (row.deleted) await deleteRow(db, TRIPS_STORE, row.userId, row.id);
-        else await putRow(db, TRIPS_STORE, { ...row, syncState: "synced" });
-        return;
-      } catch (fallbackError) {
-        throw fallbackError;
-      }
-    }
+  requireSupabase();
+  if (row.deleted) {
+    const { error } = await withSupabaseTimeout(
+      supabase!.from("trip_plans").delete().eq("user_id", row.userId).eq("id", row.id),
+      "Trip-plan sync timed out.",
+    );
+    if (error) throw new Error(error.message);
+  } else {
+    const { error } = await withSupabaseTimeout(
+      supabase!.from("trip_plans").upsert(toSupabaseTripRow(row) as never, { onConflict: "user_id,id" }),
+      "Trip-plan sync timed out.",
+    );
+    if (error) throw new Error(error.message);
   }
-
-  const reference = doc(tripsCollection(row.userId), row.id);
-  await withFirebaseTimeout(
-    row.deleted ? deleteDoc(reference) : setDoc(reference, tripDocument(row)),
-    "Trip-plan sync timed out.",
-  );
   if (row.deleted) await deleteRow(db, TRIPS_STORE, row.userId, row.id);
   else await putRow(db, TRIPS_STORE, { ...row, syncState: "synced" });
 }
 
 async function tryFlush<T>(rows: T[], flush: (row: T) => Promise<void>) {
-  await Promise.all(rows.map(async (row) => {
-    try {
-      await flush(row);
-    } catch (error) {
-      deferCloudSync(
-        error,
-        "[cloud-user-data] Cloud sync deferred; local data retained.",
-      );
-    }
-  }));
+  await Promise.all(
+    rows.map(async (row) => {
+      try {
+        await flush(row);
+      } catch (error) {
+        deferCloudSync(error, "[cloud-user-data] Cloud sync deferred; local data retained.");
+      }
+    }),
+  );
 }
 
-export async function getSavedItems(
-  db: IDBDatabase,
-  userId: string,
-  kind?: SavedKind,
-): Promise<SavedItem[]> {
+export async function getSavedItems(db: IDBDatabase, userId: string, kind?: SavedKind): Promise<SavedItem[]> {
+  requireSupabase();
   await migrateLegacyData(db, userId);
   const cached = await userRows<CachedSavedItem>(db, SAVED_STORE, userId);
-  await tryFlush(cached.filter((row) => row.syncState === "pending"), (row) => flushSavedRow(db, row));
+  await tryFlush(
+    cached.filter((row) => row.syncState === "pending"),
+    (row) => flushSavedRow(db, row),
+  );
 
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { data, error } = await withSupabaseTimeout(
-        supabase.from("saved_places").select("*").eq("user_id", userId),
-        "Saved places are taking too long to load.",
-      );
-      if (error) throw new Error(error.message);
-      const remote = (data as Record<string, unknown>[] | null ?? []).map(fromSupabaseSavedRow);
-      // remote rows are already synced; put deleted flag handling done by replaceSyncedRows + final filter
-      await replaceSyncedRows(db, SAVED_STORE, userId, remote as Array<CachedSavedItem | CachedTripPlan>);
-    } catch (error) {
-      console.warn("[cloud-user-data] Supabase saved-places fetch failed, trying Firestore:", error);
-      try {
-        const snapshot = await withFirebaseTimeout(
-          getDocs(savedCollection(userId)),
-          "Saved places are taking too long to load.",
-        );
-        const remote = snapshot.docs.map((item) => ({
-          ...(item.data() as Omit<SavedItem, "id">),
-          id: item.id,
-          userId,
-          updatedAt: item.data().createdAt as string,
-          syncState: "synced" as const,
-        }));
-        await replaceSyncedRows(db, SAVED_STORE, userId, remote as Array<CachedSavedItem | CachedTripPlan>);
-      } catch (fallbackError) {
-        deferCloudSync(fallbackError, "[cloud-user-data] Using cached saved places.");
-      }
-    }
-  } else {
-    try {
-      const snapshot = await withFirebaseTimeout(
-        getDocs(savedCollection(userId)),
-        "Saved places are taking too long to load.",
-      );
-      const remote = snapshot.docs.map((item) => ({
-        ...(item.data() as Omit<SavedItem, "id">),
-        id: item.id,
-        userId,
-        updatedAt: item.data().createdAt as string,
-        syncState: "synced" as const,
-      }));
-      await replaceSyncedRows(db, SAVED_STORE, userId, remote as Array<CachedSavedItem | CachedTripPlan>);
-    } catch (error) {
-      deferCloudSync(error, "[cloud-user-data] Using cached saved places.");
-    }
+  try {
+    const { data, error } = await withSupabaseTimeout(
+      supabase!.from("saved_places").select("*").eq("user_id", userId),
+      "Saved places are taking too long to load.",
+    );
+    if (error) throw new Error(error.message);
+    const remote = ((data as Record<string, unknown>[] | null) ?? []).map(fromSupabaseSavedRow);
+    await replaceSyncedRows(db, SAVED_STORE, userId, remote as Array<CachedSavedItem | CachedTripPlan>);
+  } catch (error) {
+    deferCloudSync(error, "[cloud-user-data] Using cached saved places.");
   }
 
   return (await userRows<CachedSavedItem>(db, SAVED_STORE, userId))
@@ -431,11 +284,8 @@ export async function getSavedIds(db: IDBDatabase, userId: string) {
   return new Set((await getSavedItems(db, userId)).map((item) => item.id));
 }
 
-export async function saveItem(
-  db: IDBDatabase,
-  userId: string,
-  item: Omit<SavedItem, "createdAt">,
-) {
+export async function saveItem(db: IDBDatabase, userId: string, item: Omit<SavedItem, "createdAt">) {
+  requireSupabase();
   await migrateLegacyData(db, userId);
   const now = new Date().toISOString();
   const row: CachedSavedItem = {
@@ -454,9 +304,9 @@ export async function saveItem(
 }
 
 export async function removeSavedItem(db: IDBDatabase, userId: string, id: string) {
+  requireSupabase();
   await migrateLegacyData(db, userId);
-  const existing = (await userRows<CachedSavedItem>(db, SAVED_STORE, userId))
-    .find((item) => item.id === id);
+  const existing = (await userRows<CachedSavedItem>(db, SAVED_STORE, userId)).find((item) => item.id === id);
   if (!existing) return;
   const row: CachedSavedItem = {
     ...existing,
@@ -473,55 +323,24 @@ export async function removeSavedItem(db: IDBDatabase, userId: string, id: strin
 }
 
 export async function getTripPlans(db: IDBDatabase, userId: string): Promise<TripPlan[]> {
+  requireSupabase();
   await migrateLegacyData(db, userId);
   const cached = await userRows<CachedTripPlan>(db, TRIPS_STORE, userId);
-  await tryFlush(cached.filter((row) => row.syncState === "pending"), (row) => flushTripRow(db, row));
+  await tryFlush(
+    cached.filter((row) => row.syncState === "pending"),
+    (row) => flushTripRow(db, row),
+  );
 
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { data, error } = await withSupabaseTimeout(
-        supabase.from("trip_plans").select("*").eq("user_id", userId),
-        "Trip plans are taking too long to load.",
-      );
-      if (error) throw new Error(error.message);
-      const remote = (data as Record<string, unknown>[] | null ?? []).map(fromSupabaseTripRow);
-      await replaceSyncedRows(db, TRIPS_STORE, userId, remote as Array<CachedSavedItem | CachedTripPlan>);
-    } catch (error) {
-      console.warn("[cloud-user-data] Supabase trip-plans fetch failed, trying Firestore:", error);
-      try {
-        const snapshot = await withFirebaseTimeout(
-          getDocs(tripsCollection(userId)),
-          "Trip plans are taking too long to load.",
-        );
-        const remote = snapshot.docs.map((item) => ({
-          ...(item.data() as Omit<TripPlan, "id">),
-          id: item.id,
-          userId,
-          updatedAt: item.data().createdAt as string,
-          syncState: "synced" as const,
-        }));
-        await replaceSyncedRows(db, TRIPS_STORE, userId, remote as Array<CachedSavedItem | CachedTripPlan>);
-      } catch (fallbackError) {
-        deferCloudSync(fallbackError, "[cloud-user-data] Using cached trip plans.");
-      }
-    }
-  } else {
-    try {
-      const snapshot = await withFirebaseTimeout(
-        getDocs(tripsCollection(userId)),
-        "Trip plans are taking too long to load.",
-      );
-      const remote = snapshot.docs.map((item) => ({
-        ...(item.data() as Omit<TripPlan, "id">),
-        id: item.id,
-        userId,
-        updatedAt: item.data().createdAt as string,
-        syncState: "synced" as const,
-      }));
-      await replaceSyncedRows(db, TRIPS_STORE, userId, remote as Array<CachedSavedItem | CachedTripPlan>);
-    } catch (error) {
-      deferCloudSync(error, "[cloud-user-data] Using cached trip plans.");
-    }
+  try {
+    const { data, error } = await withSupabaseTimeout(
+      supabase!.from("trip_plans").select("*").eq("user_id", userId),
+      "Trip plans are taking too long to load.",
+    );
+    if (error) throw new Error(error.message);
+    const remote = ((data as Record<string, unknown>[] | null) ?? []).map(fromSupabaseTripRow);
+    await replaceSyncedRows(db, TRIPS_STORE, userId, remote as Array<CachedSavedItem | CachedTripPlan>);
+  } catch (error) {
+    deferCloudSync(error, "[cloud-user-data] Using cached trip plans.");
   }
 
   return (await userRows<CachedTripPlan>(db, TRIPS_STORE, userId))
@@ -536,6 +355,7 @@ export async function createTripPlan(
   preferences: TripPlan["preferences"],
   itinerary: ItineraryDay[] = [],
 ) {
+  requireSupabase();
   await migrateLegacyData(db, userId);
   const now = new Date().toISOString();
   const row: CachedTripPlan = {
@@ -558,9 +378,9 @@ export async function createTripPlan(
 }
 
 export async function deleteTripPlan(db: IDBDatabase, userId: string, id: string) {
+  requireSupabase();
   await migrateLegacyData(db, userId);
-  const existing = (await userRows<CachedTripPlan>(db, TRIPS_STORE, userId))
-    .find((plan) => plan.id === id);
+  const existing = (await userRows<CachedTripPlan>(db, TRIPS_STORE, userId)).find((plan) => plan.id === id);
   if (!existing) return;
   const row: CachedTripPlan = {
     ...existing,
@@ -582,9 +402,9 @@ export async function updateTripPlan(
   id: string,
   updates: Partial<Pick<TripPlan, "title" | "preferences" | "itinerary">>,
 ) {
+  requireSupabase();
   await migrateLegacyData(db, userId);
-  const existing = (await userRows<CachedTripPlan>(db, TRIPS_STORE, userId))
-    .find((plan) => plan.id === id);
+  const existing = (await userRows<CachedTripPlan>(db, TRIPS_STORE, userId)).find((plan) => plan.id === id);
   if (!existing) return;
   const now = new Date().toISOString();
   const row: CachedTripPlan = {
