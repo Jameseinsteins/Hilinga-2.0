@@ -299,4 +299,20 @@ export default defineConfig({
     },
   },
   root: rootDir,
+  server: {
+    host: true,
+    port: 5173,
+    strictPort: false,
+    hmr: { overlay: true },
+    watch: { usePolling: false },
+  },
+  preview: { host: true, port: 5173 },
+  build: {
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        admin: fileURLToPath(new URL('./admin.html', import.meta.url)),
+      },
+    },
+  },
 });

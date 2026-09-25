@@ -4,6 +4,7 @@ import { AuthScreen } from "@/components/auth-screen";
 import { BusinessApp } from "@/components/business-app";
 import { HilingaApp } from "@/components/hilinga-app";
 import { OnboardingScreen } from "@/components/onboarding-screen";
+import { BusinessOnboardingScreen } from "@/components/business-onboarding-screen";
 import { PinLockScreen, SetupPinScreen, VerifyEmailScreen } from "@/components/verification-gate";
 import { auth } from "@/lib/firebase";
 import { clearPin, isPinSet, isSessionVerified } from "@/lib/verification";
@@ -72,9 +73,17 @@ function AppContent() {
     );
   }
 
-  // 3) Onboarding / routing — only reachable after both gates pass.
-  if (!profile && error) return resolveAccountMode(user.uid) === "business" ? <BusinessApp /> : <HilingaApp />;
-  if (!profile?.onboarding_completed) return <OnboardingScreen />;
+  // 3) Onboarding — DISTINCT per account mode (traveler vs business).
+  // Travelers: interests / language / budget for recommendations.
+  // Business: GCash-style KYC (business name/category/location + valid ID + permit) — must pass before posting; admin manually verifies photos.
+  if (!profile && error) {
+    // Offline/profile fetch failed — fall back to cached mode. Business stays pending until admin verifies.
+    return resolveAccountMode(user.uid) === "business" ? <BusinessApp /> : <HilingaApp />;
+  }
+  if (!profile?.onboarding_completed) {
+    const mode = resolveAccountMode(user.uid, profile?.account_mode);
+    return mode === "business" ? <BusinessOnboardingScreen /> : <OnboardingScreen />;
+  }
   if (resolveAccountMode(user.uid, profile.account_mode) === "business") return <BusinessApp />;
   return <HilingaApp />;
 }

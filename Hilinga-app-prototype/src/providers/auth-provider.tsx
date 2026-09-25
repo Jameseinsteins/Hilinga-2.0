@@ -220,6 +220,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
               budget_min: input.budget_min,
               budget_max: input.budget_max,
               notifications_enabled: input.notifications_enabled,
+              nationality: input.nationality ?? profile?.nationality ?? null,
+              country: input.country ?? profile?.country ?? null,
+              country_iso2: input.country_iso2 ?? profile?.country_iso2 ?? null,
               onboarding_completed: input.onboarding_completed,
             }, profile);
 
@@ -244,6 +247,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
               void ensureTouristPassport(userId, saved.display_name, localAvatarUrl ?? "", {
                 language: saved.language,
                 interests: saved.interests,
+                nationality: saved.nationality ?? undefined,
+                country: saved.country ?? undefined,
+                country_iso2: saved.country_iso2 ?? undefined,
               })
                 .catch((profileQrError) => console.warn("[profile-qr] Could not initialize the Profile QR:", profileQrError));
             }

@@ -1,5 +1,5 @@
 const DB_NAME = "hilinga";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 export type SavedKind = "Places" | "Itineraries" | "Businesses" | "Events";
 
@@ -84,6 +84,24 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains("user_trip_plans")) {
         const store = db.createObjectStore("user_trip_plans", {
+          keyPath: ["userId", "id"],
+        });
+        store.createIndex("by_user", "userId", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("user_bookings")) {
+        const store = db.createObjectStore("user_bookings", {
+          keyPath: ["userId", "id"],
+        });
+        store.createIndex("by_user", "userId", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("user_payments")) {
+        const store = db.createObjectStore("user_payments", {
+          keyPath: ["userId", "id"],
+        });
+        store.createIndex("by_user", "userId", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("user_itinerary_edits")) {
+        const store = db.createObjectStore("user_itinerary_edits", {
           keyPath: ["userId", "id"],
         });
         store.createIndex("by_user", "userId", { unique: false });
@@ -293,6 +311,9 @@ export async function resetLocalAccount(db: IDBDatabase) {
       "saved_items",
       "user_trip_plans",
       "user_saved_items",
+      "user_bookings",
+      "user_payments",
+      "user_itinerary_edits",
       "app_settings",
       "profiles",
     ],
@@ -303,6 +324,9 @@ export async function resetLocalAccount(db: IDBDatabase) {
   transaction.objectStore("saved_items").clear();
   transaction.objectStore("user_trip_plans").clear();
   transaction.objectStore("user_saved_items").clear();
+  transaction.objectStore("user_bookings").clear();
+  transaction.objectStore("user_payments").clear();
+  transaction.objectStore("user_itinerary_edits").clear();
   transaction.objectStore("app_settings").clear();
 
   const defaultProfile = {

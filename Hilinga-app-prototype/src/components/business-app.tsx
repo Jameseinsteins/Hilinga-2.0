@@ -8,14 +8,22 @@ import { BusinessAnalytics } from "@/components/business-analytics";
 import {
   BUSINESS_CONTENT_CHANGED_EVENT,
   ensureBusinessPage,
+  getBusinessVerificationStatus,
+  requestBusinessVerification,
+  readRegisteredBusinesses,
+  subscribeToRegisteredBusinesses,
   publishBusinessPost,
   saveBusinessPage,
   subscribeToOwnedBusinessPosts,
   subscribeToOwnedBusinessPage,
   type BusinessPageInfo,
   type BusinessPostCategory,
+  type BusinessVerificationInfo,
+  type BusinessVerificationStatus,
+  type BusinessVerificationPayload,
   type StoredBusinessItem,
 } from "@/lib/business-content";
+import { BusinessKycModal } from "@/components/business-kyc-modal";
 import {
   setBusinessInquiryStatus,
   subscribeToBusinessInquiries,
@@ -133,6 +141,13 @@ function BusinessAppShell() {
   const [editPageOpen, setEditPageOpen] = useState(false);
   const [pageError, setPageError] = useState("");
   const [pageSaving, setPageSaving] = useState(false);
+  const [verification, setVerification] = useState<BusinessVerificationInfo | null>(null);
+  const [verificationLoading, setVerificationLoading] = useState(true);
+  const [verificationActionLoading, setVerificationActionLoading] = useState(false);
+  const [verificationError, setVerificationError] = useState("");
+  const [kycOpen, setKycOpen] = useState(false);
+  // hydrated from cache for the modal
+  const kycPayload: BusinessVerificationPayload | undefined = readRegisteredBusinesses().find((b) => b.ownerUid === user?.uid)?.verificationPayload;
   const [inquiries, setInquiries] = useState<BusinessInquiry[]>([]);
   const [inquiryError, setInquiryError] = useState("");
   const [profileViewCount, setProfileViewCount] = useState(0);
@@ -211,8 +226,100 @@ function BusinessAppShell() {
     return unsubscribe;
   }, [user?.uid]);
 
+  // ── Verification status (controls Feed/Explore visibility + posting unlock) ──
+  // Auto-unlocks posting immediately when admin verifies (poll + realtime + focus).
+  useEffect(() => {
+    if (!user?.uid) { setVerificationLoading(false); return; }
+    let cancelled = false;
+    let poll: ReturnType<typeof setInterval> | null = null;
+    async function loadVerification() {
+      setVerificationLoading(true);
+      setVerificationError("");
+      try {
+        // Try Supabase direct fetch; fallback to local cache if offline
+        try {
+          const v = await getBusinessVerificationStatus(user!.uid);
+          if (cancelled) return;
+          if (v) { setVerification(v); }
+          else {
+            // No row yet (first registration) — treat as pending once page exists
+            const cached = readRegisteredBusinesses().find((b) => b.ownerUid === user!.uid);
+            if (cached) setVerification({ status: cached.verificationStatus, notes: cached.verificationNotes, verifiedAt: cached.verifiedAt, verifiedBy: cached.verifiedBy });
+            else setVerification(null);
+          }
+        } catch (err) {
+          if (cancelled) return;
+          const cached = readRegisteredBusinesses().find((b) => b.ownerUid === user!.uid);
+          if (cached) setVerification({ status: cached.verificationStatus, notes: cached.verificationNotes, verifiedAt: cached.verifiedAt, verifiedBy: cached.verifiedBy });
+          else throw err;
+        }
+      } catch (err) {
+        if (!cancelled) setVerificationError(err instanceof Error ? err.message : "Could not load verification status.");
+      } finally {
+        if (!cancelled) setVerificationLoading(false);
+      }
+    }
+    void loadVerification();
+    const refreshVerification = () => { void loadVerification(); };
+    window.addEventListener(BUSINESS_CONTENT_CHANGED_EVENT, refreshVerification);
+    window.addEventListener("focus", refreshVerification);
+    const onVisibility = () => { if (document.visibilityState === "visible") void loadVerification(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    // Poll every 8s while not verified so admin approval unlocks posting without manual refresh/re-login.
+    poll = setInterval(() => { void loadVerification(); }, 8000);
+    const unsubRegistered = subscribeToRegisteredBusinesses(
+      (businesses) => {
+        const own = businesses.find((b) => b.ownerUid === user!.uid);
+        if (own) {
+          // Only upgrade or set — avoid flipping verified back to pending due to stale cache race;
+          // loadVerification (direct storage check) is authoritative for verified.
+          setVerification((prev) => {
+            const next = { status: own.verificationStatus, notes: own.verificationNotes, verifiedAt: own.verifiedAt, verifiedBy: own.verifiedBy } as typeof prev;
+            if (prev?.status === "verified" && next?.status !== "verified") return prev;
+            return next;
+          });
+          if (own.verificationStatus === "verified" && poll) { clearInterval(poll); poll = null; }
+        }
+      },
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+      if (poll) clearInterval(poll);
+      window.removeEventListener(BUSINESS_CONTENT_CHANGED_EVENT, refreshVerification);
+      window.removeEventListener("focus", refreshVerification);
+      document.removeEventListener("visibilitychange", onVisibility);
+      unsubRegistered();
+    };
+  }, [user?.uid]);
+
+  async function handleRequestVerification() {
+    if (!user?.uid || verificationActionLoading) return;
+    setVerificationActionLoading(true);
+    setVerificationError("");
+    try {
+      await requestBusinessVerification(user.uid);
+      const v = await getBusinessVerificationStatus(user.uid).catch(() => null);
+      if (v) setVerification(v);
+      else setVerification({ status: "pending" });
+      window.dispatchEvent(new Event(BUSINESS_CONTENT_CHANGED_EVENT));
+    } catch (err) {
+      setVerificationError(err instanceof Error ? err.message : "Verification request failed. Try again.");
+    } finally {
+      setVerificationActionLoading(false);
+    }
+  }
+
+
   function navigate(next: BusinessTab) {
-    if (next === "create") { setCreateOpen(true); return; }
+    if (next === "create") {
+      if (verification?.status !== "verified") {
+        // GCash-style: block posting until verified — open KYC instead
+        setKycOpen(true);
+        return;
+      }
+      setCreateOpen(true); return;
+    }
     setTab(next);
     window.history.pushState({ businessTab: next }, "", `#business/${next}`);
   }
@@ -220,6 +327,12 @@ function BusinessAppShell() {
   async function createItem(event: FormEvent) {
     event.preventDefault();
     if (!user?.uid || !title.trim() || !mediaUrl || publishing) return;
+    if (verification?.status !== "verified") {
+      setImageError("You need to be verified before you can post — like GCash, pass the requirements first. Tap Get Verified to submit your ID and permit.");
+      setCreateOpen(false);
+      setKycOpen(true);
+      return;
+    }
     if (category === "Events" && (!eventDate || !eventLocation.trim())) { setImageError("Add the event date and location."); return; }
     if (category === "Promotions" && !promotionOffer.trim()) { setImageError("Add the promotion or offer details."); return; }
     const item: BusinessItem = { id: crypto.randomUUID(), category, title: title.trim(), detail: detail.trim(), mediaUrl, mediaType, eventDate: category === "Events" ? eventDate : undefined, eventLocation: category === "Events" ? eventLocation.trim() : undefined, promotionOffer: category === "Promotions" ? promotionOffer.trim() : undefined, promotionEnds: category === "Promotions" ? promotionEnds : undefined, createdAt: new Date().toISOString() };
@@ -302,6 +415,9 @@ function BusinessAppShell() {
       setPageInfo(saved);
       setPageDraft(saved);
       window.dispatchEvent(new Event(BUSINESS_CONTENT_CHANGED_EVENT));
+      // GCash-style: do NOT auto-request verification on save — user must submit ID + permit via Get Verified modal.
+      // Refresh verification display so banner stays accurate.
+      try { const v2 = await getBusinessVerificationStatus(user.uid).catch(() => null); if (v2) setVerification(v2); } catch {}
       setEditPageOpen(false);
     } catch (error) {
       console.error("[business-pages] Save failed:", error);
@@ -346,6 +462,77 @@ function BusinessAppShell() {
         <KeepAliveTab tab="home" active={tab} visited={visited as unknown as Set<BusinessTab>}>
           <div className="business-screen">
           <header className="business-topbar"><div><span className="business-overline">HILINGA BUSINESS</span><h1>Good day, {firstName}</h1><p>{today}</p></div><div className="business-topbar-actions"><button className="business-alert-button" onClick={() => navigate("inbox")} aria-label={`${unreadInquiryCount} unread inquiries`}><Icon name="inbox" size={22} />{unreadInquiryCount > 0 && <em>{Math.min(99, unreadInquiryCount)}</em>}</button><button className="business-alert-button" aria-label="Notifications"><Icon name="notifications" size={22} /></button></div></header>
+          {/* ── Business verification banner ── */}
+          {verificationLoading ? (
+            <div style={{ padding: "12px 16px", borderRadius: 12, background: "#F3F4F6", border: "1px solid #E5E7EB", display: "flex", gap: 10, alignItems: "center" }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 20, color: "#6B7280" }}>hourglass_empty</span>
+              <span style={{ fontSize: 13, color: "#374151" }}>Checking verification status…</span>
+            </div>
+          ) : verification?.status === "verified" ? (
+            <div style={{ padding: "12px 16px", borderRadius: 12, background: "#ECFDF5", border: "1px solid #A7F3D0", display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 20, color: "#059669" }}>verified</span>
+              <div style={{ flex: 1 }}>
+                <strong style={{ fontSize: 13, color: "#065F46" }}>Verified — live in Explore & Feed</strong>
+                <p style={{ fontSize: 12, color: "#047857", margin: "2px 0 0" }}>Your business is verified. It now appears in Explore (Businesses) and traveler Feed. Keep your hours and photos up to date.</p>
+                {verification.verifiedAt && <small style={{ fontSize: 11, color: "#6B7280" }}>Verified {new Date(verification.verifiedAt).toLocaleDateString("en-PH", { dateStyle: "medium" })}</small>}
+              </div>
+            </div>
+          ) : verification?.status === "rejected" ? (
+            <div style={{ padding: "12px 16px", borderRadius: 12, background: "#FEF2F2", border: "1px solid #FECACA", display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 20, color: "#DC2626" }}>block</span>
+              <div style={{ flex: 1 }}>
+                <strong style={{ fontSize: 13, color: "#991B1B" }}>Verification rejected — fix and resubmit</strong>
+                <p style={{ fontSize: 12, color: "#7F1D1D", margin: "2px 0 6px" }}>{verification.notes ? `Reason: ${verification.notes}` : "Your business did not pass verification. Check your ID and permit photos and resubmit."}</p>
+                <p style={{ fontSize: 11, color: "#7F1D1D", margin: "0 0 8px" }}>Tap below to reopen the 3-step GCash-style form — your previous uploads are pre-filled.</p>
+                <button
+                  onClick={() => setKycOpen(true)}
+                  style={{ padding: "8px 14px", borderRadius: 999, border: "1px solid #DC2626", background: "white", color: "#DC2626", fontWeight: 700, fontSize: 12 }}
+                >
+                  Fix and resubmit requirements
+                </button>
+                {verificationError && <p style={{ fontSize: 11, color: "#DC2626", marginTop: 6 }}>{verificationError}</p>}
+              </div>
+            </div>
+          ) : verification?.status === "pending" ? (
+            !kycPayload ? (
+              <div style={{ padding: "14px 16px", borderRadius: 16, background: "linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)", border: "1px solid #FDE68A", display: "flex", gap: 12, alignItems: "flex-start" }}>
+                <span className="material-symbols-outlined" style={{ fontSize: 26, color: "#D97706" }}>assignment</span>
+                <div style={{ flex: 1 }}>
+                  <strong style={{ fontSize: 14, color: "#92400E" }}>Action required — submit your requirements</strong>
+                  <p style={{ fontSize: 12, color: "#78350F", margin: "4px 0 0", lineHeight: 1.5 }}>Your business page is saved, but you have not submitted ID + permit yet. Like GCash, you must pass verification before you can post or appear in Explore & Feed.</p>
+                  <button onClick={() => setKycOpen(true)} style={{ marginTop: 10, padding: "10px 18px", borderRadius: 999, border: "none", background: "#D97706", color: "white", fontWeight: 800, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}><span className="material-symbols-outlined" style={{ fontSize: 18 }}>badge</span> Submit requirements — 3 steps</button>
+                  {verificationError && <p style={{ fontSize: 11, color: "#DC2626", marginTop: 6 }}>{verificationError}</p>}
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: "12px 16px", borderRadius: 12, background: "#FFFBEB", border: "1px solid #FDE68A", display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <span className="material-symbols-outlined" style={{ fontSize: 20, color: "#D97706" }}>pending</span>
+                <div style={{ flex: 1 }}>
+                  <strong style={{ fontSize: 13, color: "#92400E" }}>Verification pending — under review</strong>
+                  <p style={{ fontSize: 12, color: "#78350F", margin: "2px 0 0" }}>Your requirements were submitted. You are not visible in Explore or Feed until admin approves. Admin usually reviews within 24 hours. You cannot post until verified — like GCash, requirements come first.</p>
+                  {kycPayload?.submittedAt ? <small style={{ fontSize: 11, color: "#92400E" }}>Submitted {new Date(kycPayload.submittedAt).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })}</small> : null}
+                  {verificationError && <p style={{ fontSize: 11, color: "#DC2626", marginTop: 6 }}>{verificationError}</p>}
+                </div>
+              </div>
+            )
+          ) : (
+            <div style={{ padding: "14px 16px", borderRadius: 16, background: "linear-gradient(135deg, #EEF2FF 0%, #F0F9FF 100%)", border: "1px solid #C7D2FE", display: "flex", gap: 12, alignItems: "flex-start" }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 26, color: "#4F46E5" }}>verified_user</span>
+              <div style={{ flex: 1 }}>
+                <strong style={{ fontSize: 14, color: "#1E1B4B" }}>Get Verified — like GCash</strong>
+                <p style={{ fontSize: 12, color: "#4338CA", margin: "4px 0 2px", lineHeight: 1.5 }}>You need to pass verification <strong>before you can post</strong>. Submit your valid ID + business permit in a 3-step flow. Admin reviews the photos — only verified businesses appear in Explore & Feed.</p>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                  <button onClick={() => setKycOpen(true)} style={{ padding: "10px 18px", borderRadius: 999, border: "none", background: "#4F46E5", color: "white", fontWeight: 800, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}><span className="material-symbols-outlined" style={{ fontSize: 18 }}>badge</span> Get Verified — submit requirements</button>
+                  <button onClick={openPageEditor} style={{ padding: "10px 16px", borderRadius: 999, border: "1px solid #C7D2FE", background: "white", color: "#4338CA", fontWeight: 700, fontSize: 12 }}>Edit business info first</button>
+                </div>
+                <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 10, background: "white", border: "1px solid #E0E7FF", padding: "4px 8px", borderRadius: 999, color: "#4F46E5", fontWeight: 700 }}>① Contact person</span>
+                  <span style={{ fontSize: 10, background: "white", border: "1px solid #E0E7FF", padding: "4px 8px", borderRadius: 999, color: "#4F46E5", fontWeight: 700 }}>② Valid ID</span>
+                  <span style={{ fontSize: 10, background: "white", border: "1px solid #E0E7FF", padding: "4px 8px", borderRadius: 999, color: "#4F46E5", fontWeight: 700 }}>③ Business permit</span>
+                </div>
+              </div>
+            </div>
+          )}
           <section className="business-welcome-card"><span className="business-welcome-icon"><Icon name="storefront" size={27} /></span><div><span>BUSINESS OVERVIEW</span><h2>{businessName}</h2><p>{unreadInquiryCount ? `You have ${unreadInquiryCount} new traveler ${unreadInquiryCount === 1 ? "inquiry" : "inquiries"} waiting in your inbox.` : "Your public page, posts, visitor log, and customer messages are connected."}</p></div><button onClick={() => unreadInquiryCount ? navigate("inbox") : navigate("my-business")}>{unreadInquiryCount ? "Open inbox" : "Manage"} <Icon name="arrow_forward" size={17} /></button></section>
           <section><div className="business-section-heading"><div><span>LIVE</span><h2>At a glance</h2></div></div><div className="business-stats"><article><Icon name="visibility" /><strong>{profileViewCount}</strong><span>Unique profile viewers</span></article><article><Icon name="forum" /><strong>{inquiries.length}</strong><span>Customer inquiries</span></article><article><Icon name="inventory_2" /><strong>{items.length}</strong><span>Published items</span></article></div></section>
           <section><div className="business-section-heading"><div><span>NEXT STEPS</span><h2>Grow your presence</h2></div></div><div className="business-task-list"><button onClick={() => navigate("my-business")}><span><Icon name="domain_add" /></span><div><strong>Complete your business details</strong><p>Add your location, hours, and contact information.</p></div><Icon name="chevron_right" /></button><button onClick={() => setCreateOpen(true)}><span><Icon name="add_circle" /></span><div><strong>Create your first offering</strong><p>Publish a listing, product, service, or promotion.</p></div><Icon name="chevron_right" /></button></div></section>
@@ -368,9 +555,26 @@ function BusinessAppShell() {
               </div>
               <button className="business-edit-page-button" onClick={openPageEditor}><Icon name="edit" size={18} /> Edit Page</button>
             </div>
-            <div className="business-page-actions"><button className="primary" onClick={() => setCreateOpen(true)}><Icon name="add" size={20} /> Create</button><button><Icon name="chat" size={19} /> Message</button><button onClick={openPageEditor}><Icon name="more_horiz" size={20} /> More</button></div>
+            <div className="business-page-actions"><button className="primary" onClick={() => { if (verification?.status !== "verified") { setKycOpen(true); return; } setCreateOpen(true); }} style={verification?.status !== "verified" ? { opacity: 0.9, position: "relative" } : undefined}><Icon name={verification?.status === "verified" ? "add" : "lock"} size={20} /> {verification?.status === "verified" ? "Create" : "Verify to post"} {verification?.status !== "verified" && <span style={{ marginLeft: 6, fontSize: 10, background: "rgba(0,0,0,0.15)", padding: "2px 6px", borderRadius: 999 }}>LOCKED</span>}</button><button><Icon name="chat" size={19} /> Message</button><button onClick={openPageEditor}><Icon name="more_horiz" size={20} /> More</button></div>
           </section>
 
+          {/* Verification status on My Business */}
+          {verification?.status === "pending" && (
+            <div style={{ padding: "12px 14px", borderRadius: 12, background: "#FFFBEB", border: "1px solid #FDE68A", display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
+              <Icon name="pending" size={18} /><span style={{ fontSize: 13, color: "#92400E" }}><strong>Pending verification</strong> — not yet visible in Explore / Feed.</span>
+            </div>
+          )}
+          {verification?.status === "verified" && (
+            <div style={{ padding: "12px 14px", borderRadius: 12, background: "#ECFDF5", border: "1px solid #A7F3D0", display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
+              <Icon name="verified" size={18} /><span style={{ fontSize: 13, color: "#065F46" }}><strong>Verified</strong> — visible in Explore & Feed.</span>
+            </div>
+          )}
+          {verification?.status === "rejected" && (
+            <div style={{ padding: "12px 14px", borderRadius: 12, background: "#FEF2F2", border: "1px solid #FECACA", display: "flex", gap: 8, alignItems: "flex-start", flexDirection: "column", marginBottom: 12 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}><Icon name="block" size={18} /><span style={{ fontSize: 13, color: "#991B1B" }}><strong>Rejected</strong> — {verification.notes ?? "update requirements and resubmit."}</span></div>
+              <button onClick={() => setKycOpen(true)} style={{ padding: "8px 14px", borderRadius: 999, border: "1px solid #DC2626", background: "white", color: "#DC2626", fontWeight: 700, fontSize: 12 }}>Fix requirements and resubmit</button>
+            </div>
+          )}
           <section className="business-discovery-type" aria-label="Explore listing type">
             <div><span>EXPLORE LISTING</span><strong>How should this business appear?</strong><p>This places your page in the matching Explore showcase.</p></div>
             <div>{(["Small business", "Big enterprise"] as const).map((value) => <button key={value} disabled={pageSaving} className={pageInfo.businessScale === value ? "selected" : ""} onClick={() => void setBusinessScale(value)}><Icon name={value === "Small business" ? "storefront" : "apartment"} size={19} />{value}</button>)}</div>
@@ -381,7 +585,7 @@ function BusinessAppShell() {
               <section className="business-page-card business-about-card"><div className="business-card-heading"><h2>About Us</h2><button onClick={openPageEditor}>Edit</button></div><p>{pageInfo.about || "Add your business story so customers can learn more about you."}</p></section>
               <section className="business-page-card business-info-card"><div className="business-card-heading"><h2>Business information</h2><button onClick={openPageEditor}><Icon name="edit" size={17} /></button></div><ul><li><Icon name="category" size={19} /><div><span>Category</span><strong>{pageInfo.category}</strong></div></li><li><Icon name="location_on" size={19} /><div><span>Location</span><strong>{pageInfo.location || "Add location"}</strong></div></li><li><Icon name="schedule" size={19} /><div><span>Business hours</span><strong>{pageInfo.hours || "Add business hours"}</strong></div></li><li><Icon name="call" size={19} /><div><span>Phone</span><strong>{pageInfo.phone || "Add phone number"}</strong></div></li><li><Icon name="mail" size={19} /><div><span>Email</span><strong>{pageInfo.email || "Add email address"}</strong></div></li></ul></section>
             </div>
-            <section className="business-page-card business-posts-card"><div className="business-card-heading"><div><span>PAGE CONTENT</span><h2>Posts</h2></div><button onClick={() => setCreateOpen(true)}>+ Add new</button></div>{items.length === 0 ? <EmptyBusinessState icon="post_add" title="Create your first post" body="Share a photo, announce an event, or publish a promotion." /> : <div className="business-social-posts">{items.map((item) => {
+            <section className="business-page-card business-posts-card"><div className="business-card-heading"><div><span>PAGE CONTENT</span><h2>Posts</h2>{verification?.status !== "verified" && <span style={{ fontSize: 10, fontWeight: 800, background: "#FEF3C7", border: "1px solid #FDE68A", color: "#92400E", padding: "3px 8px", borderRadius: 999, marginLeft: 8 }}>POSTING LOCKED — VERIFY FIRST</span>}</div><button onClick={() => { if (verification?.status !== "verified") { setKycOpen(true); return; } setCreateOpen(true); }} style={verification?.status !== "verified" ? { background: "#F59E0B", color: "white" } : undefined}>{verification?.status === "verified" ? "+ Add new" : "Get Verified to post"}</button></div>{verification?.status !== "verified" && items.length === 0 ? <div style={{ padding: "28px 20px", textAlign: "center", background: "#FFFBEB", border: "1px dashed #FDE68A", borderRadius: 14 }}><span className="material-symbols-outlined" style={{ fontSize: 36, color: "#D97706" }}>lock</span><p style={{ fontWeight: 800, margin: "10px 0 4px", color: "#92400E" }}>Posting locked until verified</p><p style={{ fontSize: 13, color: "#78350F", margin: "0 0 12px" }}>Like GCash, submit your valid ID + business permit first. After admin approves, you can publish photos, events, and promotions to Feed & Explore.</p><button onClick={() => setKycOpen(true)} style={{ padding: "10px 18px", borderRadius: 999, border: "none", background: "#D97706", color: "white", fontWeight: 800, fontSize: 13 }}>Get Verified — submit requirements</button></div> : items.length === 0 ? <EmptyBusinessState icon="post_add" title="Create your first post" body="Share a photo, announce an event, or publish a promotion." /> : <div className="business-social-posts">{items.map((item) => {
               const postCategory = item.category ?? (item.kind === "Promotion" ? "Promotions" : item.kind === "Events" ? "Events" : "Photos & Videos");
               const postMedia = item.mediaUrl ?? item.imageUrl;
               return <article key={item.id} className={`business-category-${postCategory.toLowerCase().replace(/[^a-z]+/g, "-")}`}><header><div className="business-post-avatar">{pageInfo.logoUrl ? <img src={pageInfo.logoUrl} alt="" /> : <Icon name="storefront" size={20} />}</div><div><strong>{businessName} <span className="business-inline-verified"><Icon name="verified" size={15} /></span></strong><small>{new Date(item.createdAt).toLocaleDateString("en-PH", { month: "long", day: "numeric" })}</small></div><span className="business-post-category"><Icon name={postCategory === "Events" ? "event" : postCategory === "Promotions" ? "campaign" : "perm_media"} size={14} />{postCategory}</span></header><h3>{item.title}</h3>{item.detail && <p>{item.detail}</p>}{postCategory === "Events" && <div className="business-post-detail"><Icon name="event" size={18} /><div><strong>{item.eventDate ? new Date(`${item.eventDate}T00:00:00`).toLocaleDateString("en-PH", { weekday: "short", month: "long", day: "numeric", year: "numeric" }) : "Date to be announced"}</strong><span><Icon name="location_on" size={14} />{item.eventLocation || "Location to be announced"}</span></div></div>}{postCategory === "Promotions" && <div className="business-post-detail business-promo-detail"><Icon name="local_offer" size={18} /><div><strong>{item.promotionOffer || "Special promotion"}</strong><span>{item.promotionEnds ? `Available until ${new Date(`${item.promotionEnds}T00:00:00`).toLocaleDateString("en-PH", { month: "long", day: "numeric", year: "numeric" })}` : "Limited-time offer"}</span></div></div>}{postMedia && (item.mediaType === "video" ? <video src={postMedia} className="business-post-image" controls playsInline /> : <img src={postMedia} alt={item.title} className="business-post-image" />)}<footer><button><Icon name="thumb_up" size={18} /> Like</button><button><Icon name="chat_bubble" size={18} /> Comment</button><button><Icon name="share" size={18} /> Share</button></footer></article>;
@@ -411,6 +615,7 @@ function BusinessAppShell() {
 
       {createOpen && <div className="business-modal-backdrop" onClick={(event) => event.target === event.currentTarget && setCreateOpen(false)}><form className="business-create-sheet" onSubmit={createItem}><div className="business-sheet-handle" /><header><div><span>CREATE POST</span><h2>Choose a post category</h2></div><button type="button" onClick={() => setCreateOpen(false)} aria-label="Close"><Icon name="close" /></button></header><div className="business-kind-grid business-category-grid">{(["Photos & Videos", "Events", "Promotions"] as BusinessPostCategory[]).map((value) => <button type="button" key={value} className={category === value ? "selected" : ""} onClick={() => { setCategory(value); setImageError(""); }}><Icon name={{ "Photos & Videos": "perm_media", Events: "event", Promotions: "campaign" }[value]} size={22} /><span>{value}</span></button>)}</div><div className="business-image-field"><span className="business-image-label">Photo or video</span>{mediaUrl ? <div className="business-image-preview">{mediaType === "video" ? <video src={mediaUrl} aria-label="Video upload preview" controls playsInline /> : <img src={mediaUrl} alt="Upload preview" />}<div><label htmlFor="business-media-upload"><Icon name="photo_camera" size={18} /> Replace</label><button type="button" onClick={() => setMediaUrl("")}><Icon name="delete" size={18} /> Remove</button></div></div> : <label className="business-image-upload" htmlFor="business-media-upload"><Icon name="add_photo_alternate" size={30} /><strong>Upload a photo or video</strong><span>Images up to 10 MB · Videos up to 3 MB</span></label>}<input id="business-media-upload" className="file-input-hidden" type="file" accept="image/*,video/*" onChange={(event) => void chooseMedia(event.target.files?.[0])} />{imageError && <p className="business-image-error" role="alert">{imageError}</p>}</div><label>Post title<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={category === "Events" ? "Name your event" : category === "Promotions" ? "Name your promotion" : "Add a title"} /></label>{category === "Events" && <div className="business-editor-grid"><label>Event date<input type="date" value={eventDate} onChange={(event) => setEventDate(event.target.value)} /></label><label>Event location<input value={eventLocation} onChange={(event) => setEventLocation(event.target.value)} placeholder="Venue or address" /></label></div>}{category === "Promotions" && <div className="business-editor-grid"><label>Offer details<input value={promotionOffer} onChange={(event) => setPromotionOffer(event.target.value)} placeholder="e.g. 20% off all tours" /></label><label>Offer ends <small>(optional)</small><input type="date" value={promotionEnds} onChange={(event) => setPromotionEnds(event.target.value)} /></label></div>}<label>Caption <small>(optional)</small><textarea value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="Write something about this post" /></label><button className="business-publish-button" type="submit" disabled={!title.trim() || !mediaUrl}>Publish to {category}</button></form></div>}
 
+      <BusinessKycModal open={kycOpen} onClose={() => setKycOpen(false)} ownerUid={user?.uid ?? ""} businessName={businessName} status={verification?.status ?? null} existingPayload={kycPayload} existingNotes={verification?.notes} onSubmitted={async () => { try { const v = await getBusinessVerificationStatus(user!.uid).catch(() => null); if (v) setVerification(v); else setVerification({ status: "pending" }); } catch {} window.dispatchEvent(new Event(BUSINESS_CONTENT_CHANGED_EVENT)); }} />
       {editPageOpen && <div className="business-modal-backdrop" onClick={(event) => event.target === event.currentTarget && setEditPageOpen(false)}><form className="business-create-sheet business-page-editor" onSubmit={savePageInfo}><div className="business-sheet-handle" /><header><div><span>BUSINESS PAGE</span><h2>Edit business information</h2></div><button type="button" onClick={() => setEditPageOpen(false)} aria-label="Close"><Icon name="close" /></button></header><div className="business-page-image-editors"><label htmlFor="business-cover-upload"><span>Banner</span><div className="business-editor-cover">{pageDraft.coverUrl ? <img src={pageDraft.coverUrl} alt="Cover preview" /> : <Icon name="landscape" size={28} />}<strong><Icon name="photo_camera" size={17} /> {pageDraft.coverUrl ? "Replace" : "Upload"}</strong></div></label><label htmlFor="business-logo-upload"><span>Profile picture</span><div className="business-editor-logo">{pageDraft.logoUrl ? <img src={pageDraft.logoUrl} alt="Profile preview" /> : <Icon name="storefront" size={26} />}<strong><Icon name="photo_camera" size={16} /></strong></div></label><input id="business-cover-upload" className="file-input-hidden" type="file" accept="image/*" onChange={(event) => void choosePageImage(event.target.files?.[0], "coverUrl")} /><input id="business-logo-upload" className="file-input-hidden" type="file" accept="image/*" onChange={(event) => void choosePageImage(event.target.files?.[0], "logoUrl")} /></div><label>Business name<input value={pageDraft.name} onChange={(event) => setPageDraft({ ...pageDraft, name: event.target.value })} placeholder="Business name" /></label><label>Category<input value={pageDraft.category} onChange={(event) => setPageDraft({ ...pageDraft, category: event.target.value })} placeholder="Cafe, tours, retail..." /></label><label>Location<input value={pageDraft.location} onChange={(event) => setPageDraft({ ...pageDraft, location: event.target.value })} placeholder="City, province" /></label><div className="business-editor-grid"><label>Phone<input type="tel" value={pageDraft.phone} onChange={(event) => setPageDraft({ ...pageDraft, phone: event.target.value })} placeholder="Phone number" /></label><label>Email<input type="email" value={pageDraft.email} onChange={(event) => setPageDraft({ ...pageDraft, email: event.target.value })} placeholder="Business email" /></label></div><label>Business hours<input value={pageDraft.hours} onChange={(event) => setPageDraft({ ...pageDraft, hours: event.target.value })} placeholder="e.g. Mon–Sat · 9:00 AM–6:00 PM" /></label><label>About Us<textarea value={pageDraft.about} onChange={(event) => setPageDraft({ ...pageDraft, about: event.target.value })} placeholder="Tell customers about your business" /></label>{pageError && <p className="business-image-error" role="alert">{pageError}</p>}<button className="business-publish-button" type="submit">Save business page</button></form></div>}
     </div>
   );

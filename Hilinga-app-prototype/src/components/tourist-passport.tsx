@@ -141,7 +141,10 @@ export function ProfileQrCard() {
     setSaving(true);
     setMessage("");
     try {
-      setPassport(await regenerateTouristQr(user.uid));
+      const next = await regenerateTouristQr(user.uid);
+      setPassport(next);
+      // force QR image regeneration even if token observation is delayed
+      setQrGenerationAttempt((value) => value + 1);
       setMessage("A new Profile QR is active. Your old QR was revoked.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "The Profile QR could not be regenerated.");

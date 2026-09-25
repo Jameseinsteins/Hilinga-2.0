@@ -51,11 +51,48 @@ create table if not exists public.businesses (
   logo_url text,
   latitude double precision,
   longitude double precision,
+  verification_status text not null default 'pending' check (verification_status in ('pending','verified','rejected')),
+  verification_notes text,
+  verified_at timestamptz,
+  verified_by text,
+  verification_payload jsonb,
+  verification_submitted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 drop trigger if exists trg_businesses_updated_at on public.businesses;
 create trigger trg_businesses_updated_at before update on public.businesses for each row execute function public.set_updated_at();
+
+-- Backfill for existing tables missing verification columns (idempotent)
+do $$
+begin
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='businesses' and column_name='verification_status') then
+    alter table public.businesses add column verification_status text not null default 'pending' check (verification_status in ('pending','verified','rejected'));
+  end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='businesses' and column_name='verification_notes') then
+    alter table public.businesses add column verification_notes text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='businesses' and column_name='verified_at') then
+    alter table public.businesses add column verified_at timestamptz;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='businesses' and column_name='verified_by') then
+    alter table public.businesses add column verified_by text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='businesses' and column_name='verification_payload') then
+    alter table public.businesses add column verification_payload jsonb;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='businesses' and column_name='verification_submitted_at') then
+    alter table public.businesses add column verification_submitted_at timestamptz;
+  end if;
+end $$;
+
+-- Verification is MANUAL ONLY (like GCash) — admin must review ID/permit photos before approving.
+-- No auto-verify: every new business stays 'pending' until admin sets it to 'verified'.
+-- Existing businesses that were created before KYC should be verified manually in the Admin dashboard
+-- (open http://localhost:5174/admin.html -> Pending -> Verify). If you need to bulk-verify old rows once, run:
+--   update public.businesses set verification_status='verified', verified_at=now() where owner_uid='YOUR_EXISTING_OWNER_UID';
+-- (intentionally NOT auto-verifying all rows)
+create index if not exists idx_businesses_verification on public.businesses(verification_status);
 
 -- ============================================================
 -- 3) business_posts  (Firestore: businessPosts/{ownerUid_sourceId})
@@ -201,8 +238,26 @@ create table if not exists public.community_posts (
   category text,
   experience text,
   rating int check (rating between 1 and 5),
+  author_nationality text,
+  author_country text,
+  author_country_iso2 text,
   created_at timestamptz not null default now()
 );
+
+-- Backfill community_posts nationality columns (idempotent)
+do $$
+begin
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='community_posts' and column_name='author_nationality') then
+    alter table public.community_posts add column author_nationality text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='community_posts' and column_name='author_country') then
+    alter table public.community_posts add column author_country text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='community_posts' and column_name='author_country_iso2') then
+    alter table public.community_posts add column author_country_iso2 text;
+  end if;
+end $$;
+
 create index if not exists idx_cp_created on public.community_posts(created_at desc);
 create index if not exists idx_cp_author on public.community_posts(author_uid);
 
@@ -299,6 +354,25 @@ create index if not exists idx_ie_user on public.itinerary_edits(user_id);
 create index if not exists idx_ie_booking on public.itinerary_edits(booking_id);
 
 -- ============================================================
+
+-- Nationality / country on profiles for Explore badge (idempotent)
+do $$
+begin
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='nationality') then
+    alter table public.profiles add column nationality text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='country') then
+    alter table public.profiles add column country text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='country_iso2') then
+    alter table public.profiles add column country_iso2 text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='avatar_path') then
+    -- no-op guard
+    null;
+  end if;
+end $$;
+
 -- RLS: permissive for Phase 1 (Firebase uid != Supabase auth.uid(), so auth.uid() is null)
 -- App enforces owner_uid = user.uid. Tighten to auth.uid() in Phase 2 after Supabase Auth cutover.
 -- ============================================================

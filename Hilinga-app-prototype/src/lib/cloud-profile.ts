@@ -24,9 +24,19 @@ type SupabaseProfileRow = {
   budget_max: number | null;
   notifications_enabled: boolean | null;
   onboarding_completed: boolean | null;
+  nationality: string | null;
+  country: string | null;
+  country_iso2: string | null;
   created_at: string | null;
   updated_at: string | null;
 };
+
+function isMissingNationalityColumn(error: unknown): boolean {
+  const raw = error as { message?: string; code?: string; details?: string };
+  const msg = error instanceof Error ? error.message : String(raw?.message ?? raw?.details ?? "");
+  const code = String(raw?.code ?? "");
+  return code === "PGRST204" || code === "42703" || msg.includes("nationality") || msg.includes("country_iso2") || (msg.includes("column") && msg.includes("does not exist"));
+}
 
 function supabaseRowToProfile(row: SupabaseProfileRow): CloudProfile {
   return {
@@ -40,6 +50,9 @@ function supabaseRowToProfile(row: SupabaseProfileRow): CloudProfile {
     budget_max: row.budget_max ?? null,
     notifications_enabled: row.notifications_enabled ?? true,
     onboarding_completed: row.onboarding_completed ?? false,
+    nationality: (row.nationality as string | null) ?? null,
+    country: (row.country as string | null) ?? null,
+    country_iso2: (row.country_iso2 as string | null) ?? null,
     created_at: row.created_at ?? "",
     updated_at: row.updated_at ?? "",
   };
@@ -57,6 +70,9 @@ function toSupabaseRow(profile: CloudProfileInput): Record<string, unknown> {
     budget_max: profile.budget_max ?? null,
     notifications_enabled: profile.notifications_enabled ?? true,
     onboarding_completed: profile.onboarding_completed ?? false,
+    nationality: profile.nationality ?? null,
+    country: profile.country ?? null,
+    country_iso2: profile.country_iso2 ?? null,
   };
 }
 
@@ -106,17 +122,29 @@ async function supabaseGetProfile(userId: string): Promise<CloudProfile | null> 
 
 async function supabaseSaveProfile(profile: CloudProfileInput): Promise<CloudProfile> {
   const row = toSupabaseRow(profile);
-  const { data, error } = await withSupabaseTimeout(
-    supabase!
-      .from("profiles")
-      .upsert(row as never, { onConflict: "id" })
-      .select()
-      .single(),
-    "Supabase profile save timed out.",
-  );
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("Profile save returned no data.");
-  return supabaseRowToProfile(data as SupabaseProfileRow);
+  let attempt: Record<string, unknown> = row;
+  for (let tries = 0; tries < 2; tries++) {
+    const { data, error } = await withSupabaseTimeout(
+      supabase!
+        .from("profiles")
+        .upsert(attempt as never, { onConflict: "id" })
+        .select()
+        .single(),
+      "Supabase profile save timed out.",
+    );
+    if (!error) {
+      if (!data) throw new Error("Profile save returned no data.");
+      return supabaseRowToProfile(data as SupabaseProfileRow);
+    }
+    if (tries === 0 && isMissingNationalityColumn(error)) {
+      console.warn("[cloud-profile] nationality columns missing — retrying without them. Run full_migration.sql to add them.");
+      const { nationality: _n, country: _c, country_iso2: _iso, ...rest } = attempt;
+      attempt = rest;
+      continue;
+    }
+    throw new Error(error.message);
+  }
+  throw new Error("Profile save failed after retry.");
 }
 
 async function supabaseInitializeProfile(userId: string, displayName: string, accountMode: AccountMode) {

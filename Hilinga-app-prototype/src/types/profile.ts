@@ -9,6 +9,9 @@ export type CloudProfile = {
   budget_max: number | null;
   notifications_enabled: boolean;
   onboarding_completed: boolean;
+  nationality: string | null;
+  country: string | null;
+  country_iso2: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -25,4 +28,5 @@ export type CloudProfileInput = Pick<
   | "budget_max"
   | "notifications_enabled"
   | "onboarding_completed"
->;
+> &
+  Partial<Pick<CloudProfile, "nationality" | "country" | "country_iso2">>;

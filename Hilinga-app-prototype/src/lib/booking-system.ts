@@ -45,8 +45,13 @@ type CachedItineraryEdit = {
 
 function requireSupabase() {
   if (!isSupabaseConfigured || !supabase) {
-    throw new Error("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.");
+    console.warn("[booking-system] Supabase not configured — working offline (IndexedDB only).");
+    return;
   }
+}
+
+function hasCloud(): boolean {
+  return Boolean(isSupabaseConfigured && supabase);
 }
 
 function deferCloudSync(error: unknown, message: string) {
@@ -256,7 +261,10 @@ function fromSupabaseItineraryEditRow(data: Record<string, unknown>): CachedItin
 }
 
 async function flushBookingRow(db: IDBDatabase, row: CachedBooking) {
-  requireSupabase();
+  if (!hasCloud()) {
+    await putRow(db, BOOKINGS_STORE, { ...row, syncState: "synced" as const });
+    return;
+  }
   if (row.deleted) {
     const { error } = await withSupabaseTimeout(
       supabase!.from("bookings").delete().eq("user_id", row.userId).eq("id", row.id),
@@ -275,7 +283,10 @@ async function flushBookingRow(db: IDBDatabase, row: CachedBooking) {
 }
 
 async function flushPaymentRow(db: IDBDatabase, row: CachedPayment) {
-  requireSupabase();
+  if (!hasCloud()) {
+    await putRow(db, PAYMENTS_STORE, { ...row, syncState: "synced" as const });
+    return;
+  }
   const { error } = await withSupabaseTimeout(
     supabase!.from("payments").upsert(toSupabasePaymentRow(row) as never, { onConflict: "user_id,id" }),
     "Payment sync timed out.",
@@ -285,7 +296,10 @@ async function flushPaymentRow(db: IDBDatabase, row: CachedPayment) {
 }
 
 async function flushItineraryEditRow(db: IDBDatabase, row: CachedItineraryEdit) {
-  requireSupabase();
+  if (!hasCloud()) {
+    await putRow(db, ITINERARY_EDITS_STORE, { ...row, syncState: "synced" as const });
+    return;
+  }
   const { error } = await withSupabaseTimeout(
     supabase!.from("itinerary_edits").upsert(toSupabaseItineraryEditRow(row) as never, { onConflict: "id" }),
     "Itinerary edit sync timed out.",
@@ -309,23 +323,23 @@ async function tryFlush<T>(rows: T[], flush: (row: T) => Promise<void>) {
 // ── Booking Operations ──
 
 export async function getBookings(db: IDBDatabase, userId: string): Promise<Booking[]> {
-  requireSupabase();
   const cached = await userRows<CachedBooking>(db, BOOKINGS_STORE, userId);
-  await tryFlush(
-    cached.filter((row) => row.syncState === "pending"),
-    (row) => flushBookingRow(db, row),
-  );
-
-  try {
-    const { data, error } = await withSupabaseTimeout(
-      supabase!.from("bookings").select("*").eq("user_id", userId),
-      "Bookings are taking too long to load.",
+  if (hasCloud()) {
+    await tryFlush(
+      cached.filter((row) => row.syncState === "pending"),
+      (row) => flushBookingRow(db, row),
     );
-    if (error) throw new Error(error.message);
-    const remote = ((data as Record<string, unknown>[] | null) ?? []).map(fromSupabaseBookingRow);
-    await replaceSyncedRows(db, BOOKINGS_STORE, userId, remote);
-  } catch (error) {
-    deferCloudSync(error, "[booking-system] Using cached bookings.");
+    try {
+      const { data, error } = await withSupabaseTimeout(
+        supabase!.from("bookings").select("*").eq("user_id", userId),
+        "Bookings are taking too long to load.",
+      );
+      if (error) throw new Error(error.message);
+      const remote = ((data as Record<string, unknown>[] | null) ?? []).map(fromSupabaseBookingRow);
+      await replaceSyncedRows(db, BOOKINGS_STORE, userId, remote);
+    } catch (error) {
+      deferCloudSync(error, "[booking-system] Using cached bookings.");
+    }
   }
 
   return (await userRows<CachedBooking>(db, BOOKINGS_STORE, userId))
@@ -343,7 +357,6 @@ export async function createBooking(
   pricing: PriceBreakdown,
   confirmationNumber: string,
 ): Promise<Booking> {
-  requireSupabase();
   const now = new Date().toISOString();
   const booking: Booking = {
     id: `booking-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -382,7 +395,6 @@ export async function updateBookingStatus(
   status: BookingStatus,
   paymentStatus?: PaymentStatus,
 ): Promise<void> {
-  requireSupabase();
   const bookings = await userRows<CachedBooking>(db, BOOKINGS_STORE, userId);
   const existing = bookings.find((b) => b.id === bookingId);
   if (!existing) throw new Error("Booking not found");
@@ -412,7 +424,6 @@ export async function addInstallmentSchedule(
   bookingId: string,
   installments: InstallmentSchedule[],
 ): Promise<void> {
-  requireSupabase();
   const bookings = await userRows<CachedBooking>(db, BOOKINGS_STORE, userId);
   const existing = bookings.find((b) => b.id === bookingId);
   if (!existing) throw new Error("Booking not found");
@@ -434,7 +445,6 @@ export async function addInstallmentSchedule(
 }
 
 export async function cancelBooking(db: IDBDatabase, userId: string, bookingId: string): Promise<void> {
-  requireSupabase();
   const bookings = await userRows<CachedBooking>(db, BOOKINGS_STORE, userId);
   const existing = bookings.find((b) => b.id === bookingId);
   if (!existing) throw new Error("Booking not found");
@@ -459,23 +469,23 @@ export async function cancelBooking(db: IDBDatabase, userId: string, bookingId: 
 // ── Payment Operations ──
 
 export async function getPayments(db: IDBDatabase, userId: string): Promise<PaymentTransaction[]> {
-  requireSupabase();
   const cached = await userRows<CachedPayment>(db, PAYMENTS_STORE, userId);
-  await tryFlush(
-    cached.filter((row) => row.syncState === "pending"),
-    (row) => flushPaymentRow(db, row),
-  );
-
-  try {
-    const { data, error } = await withSupabaseTimeout(
-      supabase!.from("payments").select("*").eq("user_id", userId),
-      "Payments are taking too long to load.",
+  if (hasCloud()) {
+    await tryFlush(
+      cached.filter((row) => row.syncState === "pending"),
+      (row) => flushPaymentRow(db, row),
     );
-    if (error) throw new Error(error.message);
-    const remote = ((data as Record<string, unknown>[] | null) ?? []).map(fromSupabasePaymentRow);
-    await replaceSyncedRows(db, PAYMENTS_STORE, userId, remote);
-  } catch (error) {
-    deferCloudSync(error, "[booking-system] Using cached payments.");
+    try {
+      const { data, error } = await withSupabaseTimeout(
+        supabase!.from("payments").select("*").eq("user_id", userId),
+        "Payments are taking too long to load.",
+      );
+      if (error) throw new Error(error.message);
+      const remote = ((data as Record<string, unknown>[] | null) ?? []).map(fromSupabasePaymentRow);
+      await replaceSyncedRows(db, PAYMENTS_STORE, userId, remote);
+    } catch (error) {
+      deferCloudSync(error, "[booking-system] Using cached payments.");
+    }
   }
 
   return (await userRows<CachedPayment>(db, PAYMENTS_STORE, userId)).sort((a, b) =>
@@ -484,7 +494,6 @@ export async function getPayments(db: IDBDatabase, userId: string): Promise<Paym
 }
 
 export async function recordPayment(db: IDBDatabase, userId: string, payment: PaymentTransaction): Promise<void> {
-  requireSupabase();
   const row: CachedPayment = {
     ...payment,
     userId,
@@ -518,7 +527,6 @@ export async function insertItineraryStop(
   position: number,
   newStop: ItineraryDay,
 ): Promise<string> {
-  requireSupabase();
   const now = new Date().toISOString();
   const editId = `edit-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -552,16 +560,15 @@ export async function getItineraryEdits(
   userId: string,
   bookingId: string,
 ): Promise<CachedItineraryEdit[]> {
-  requireSupabase();
   const cached = await userRows<CachedItineraryEdit>(db, ITINERARY_EDITS_STORE, userId);
-  await tryFlush(
-    cached.filter((row) => row.syncState === "pending"),
-    (row) => flushItineraryEditRow(db, row),
-  );
-
-  try {
-    const { data, error } = await withSupabaseTimeout(
-      supabase!.from("itinerary_edits").select("*").eq("user_id", userId),
+  if (hasCloud()) {
+    await tryFlush(
+      cached.filter((row) => row.syncState === "pending"),
+      (row) => flushItineraryEditRow(db, row),
+    );
+    try {
+      const { data, error } = await withSupabaseTimeout(
+        supabase!.from("itinerary_edits").select("*").eq("user_id", userId),
       "Itinerary edits are taking too long to load.",
     );
     if (error) throw new Error(error.message);
@@ -569,6 +576,7 @@ export async function getItineraryEdits(
     await replaceSyncedRows(db, ITINERARY_EDITS_STORE, userId, remote);
   } catch (error) {
     deferCloudSync(error, "[booking-system] Using cached itinerary edits.");
+  }
   }
 
   const edits = await userRows<CachedItineraryEdit>(db, ITINERARY_EDITS_STORE, userId);

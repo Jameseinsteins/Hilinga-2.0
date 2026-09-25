@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 
 import type { AvatarUpload } from "@/lib/cloud-profile";
 import { useAuth } from "@/providers/auth-provider";
+import { NATIONALITY_OPTIONS, iso2ToFlag } from "@/lib/nationality";
 
 const interestOptions = [
   "Nature",
@@ -26,6 +27,7 @@ export function OnboardingScreen() {
   const [avatar, setAvatar] = useState<AvatarUpload | null>(null);
   const [interests, setInterests] = useState<string[]>(profile?.interests ?? []);
   const [language, setLanguage] = useState(profile?.language || "English");
+  const [nationality, setNationality] = useState(profile?.nationality || "Filipino");
   const [budgetMin, setBudgetMin] = useState(profile?.budget_min?.toString() ?? "");
   const [budgetMax, setBudgetMax] = useState(profile?.budget_max?.toString() ?? "");
   const [notifications, setNotifications] = useState(profile?.notifications_enabled ?? true);
@@ -70,6 +72,7 @@ export function OnboardingScreen() {
 
     setSaving(true);
     try {
+      const natOpt = NATIONALITY_OPTIONS.find((o) => o.value === nationality) ?? NATIONALITY_OPTIONS[0];
       await completeOnboarding({
         display_name: displayName,
         avatarSelection: avatar,
@@ -78,6 +81,9 @@ export function OnboardingScreen() {
         budget_min: min,
         budget_max: max,
         notifications_enabled: notifications,
+        nationality: natOpt.value,
+        country: natOpt.country,
+        country_iso2: natOpt.iso2,
         onboarding_completed: true,
       });
     } catch (nextError) {
@@ -162,6 +168,31 @@ export function OnboardingScreen() {
                 );
               })}
             </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+            <label className="field-label">Nationality · where are you from?</label>
+            <div style={{ position: "relative" }}>
+              <select
+                value={nationality}
+                onChange={(e) => setNationality(e.target.value)}
+                className="input"
+                style={{ width: "100%", paddingRight: 40, appearance: "none" }}
+                aria-label="Select nationality"
+              >
+                {NATIONALITY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {iso2ToFlag(opt.iso2)} {opt.label} · {opt.country}
+                  </option>
+                ))}
+              </select>
+              <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", fontSize: 16 }}>
+                {iso2ToFlag((NATIONALITY_OPTIONS.find((o) => o.value === nationality)?.iso2) ?? "PH")}
+              </span>
+            </div>
+            <span style={{ color: "var(--c-muted)", fontSize: 11, lineHeight: "15px" }}>
+              Shown as a flag badge in Explore reviews so locals and businesses know where visitors are from.
+            </span>
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>

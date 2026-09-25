@@ -9,7 +9,13 @@
     "lint": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
     "typecheck": "tsc --noEmit",
     "typecheck:api": "tsc -p ../api/tsconfig.json",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "autorun": "node scripts/hilinga-autorun.mjs",
+    "dev:host": "vite --host --port 5173 --configLoader runner",
+    "dev:admin": "vite --host --port 5174 --configLoader runner --open admin.html",
+    "dev:all": "vite --host --port 5173 --configLoader runner & vite --host --port 5174 --configLoader runner",
+    "build:admin": "tsc -b && vite build --configLoader runner",
+    "preview:admin": "vite preview --host --port 4174 --configLoader runner"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.0",

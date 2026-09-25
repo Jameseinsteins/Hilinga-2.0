@@ -30,6 +30,9 @@ export type CommunityPost = {
   category: ExperienceCategory;
   experience: string;
   rating: number | null;
+  authorNationality: string | null;
+  authorCountry: string | null;
+  authorCountryIso2: string | null;
   createdAt: Timestamp | null;
 };
 
@@ -43,6 +46,9 @@ export type NewCommunityPost = Pick<
   | "category"
   | "experience"
   | "rating"
+  | "authorNationality"
+  | "authorCountry"
+  | "authorCountryIso2"
 >;
 
 function requireSupabase() {
@@ -61,6 +67,9 @@ type SupabaseCommunityRow = {
   category: string | null;
   experience: string | null;
   rating: number | null;
+  author_nationality: string | null;
+  author_country: string | null;
+  author_country_iso2: string | null;
   created_at: string | null;
 };
 
@@ -75,6 +84,9 @@ function rowToPost(row: SupabaseCommunityRow): CommunityPost {
     category: (row.category as ExperienceCategory) ?? "Place",
     experience: row.experience ?? "",
     rating: row.rating ?? null,
+    authorNationality: row.author_nationality ?? null,
+    authorCountry: row.author_country ?? null,
+    authorCountryIso2: row.author_country_iso2 ?? null,
     createdAt: row.created_at ? Timestamp.fromDate(new Date(row.created_at)) : null,
   };
 }
@@ -129,21 +141,42 @@ function supabaseSubscribeToCommunityPosts(
   };
 }
 
+function isMissingNationalityCol(error: unknown): boolean {
+  const raw = error as { message?: string; code?: string };
+  const msg = error instanceof Error ? error.message : String((raw as { message?: string })?.message ?? "");
+  const code = String((raw as { code?: string })?.code ?? "");
+  return code === "PGRST204" || code === "42703" || msg.includes("author_nationality") || msg.includes("author_country");
+}
+
 async function supabaseCreateCommunityPost(input: NewCommunityPost) {
-  const { error } = await withSupabaseTimeout(
-    supabase!.from("community_posts").insert({
-      author_uid: input.authorUid,
-      author_name: input.authorName.trim().slice(0, 80),
-      author_avatar_url: input.authorAvatarUrl,
-      place_name: input.placeName.trim(),
-      location: input.location.trim(),
-      category: input.category,
-      experience: input.experience.trim(),
-      rating: input.rating,
-    } as never),
-    "Supabase create community post timed out.",
-  );
-  if (error) throw new Error(error.message);
+  const baseRow: Record<string, unknown> = {
+    author_uid: input.authorUid,
+    author_name: input.authorName.trim().slice(0, 80),
+    author_avatar_url: input.authorAvatarUrl,
+    place_name: input.placeName.trim(),
+    location: input.location.trim(),
+    category: input.category,
+    experience: input.experience.trim(),
+    rating: input.rating,
+    author_nationality: input.authorNationality ?? null,
+    author_country: input.authorCountry ?? null,
+    author_country_iso2: input.authorCountryIso2 ?? null,
+  };
+  let attempt: Record<string, unknown> = baseRow;
+  for (let tries = 0; tries < 2; tries++) {
+    const { error } = await withSupabaseTimeout(
+      supabase!.from("community_posts").insert(attempt as never),
+      "Supabase create community post timed out.",
+    );
+    if (!error) return;
+    if (tries === 0 && isMissingNationalityCol(error)) {
+      console.warn("[community-feed] nationality columns missing — retrying without them. Run full_migration.sql.");
+      const { author_nationality: _n, author_country: _c, author_country_iso2: _iso, ...rest } = attempt;
+      attempt = rest;
+      continue;
+    }
+    throw new Error(error.message);
+  }
 }
 
 async function supabaseDeleteCommunityPost(postId: string) {

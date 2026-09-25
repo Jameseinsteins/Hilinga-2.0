@@ -1439,6 +1439,10 @@ ul, ol { list-style: none; }
 }
 
 /* ── Map ── */
+/* ── Admin scrollable fix: allow admin.html to scroll independently ── */
+#admin-root { height: 100dvh; overflow: hidden; display: flex; flex-direction: column; }
+#admin-root > div { min-height: 0; }
+
 .map-screen {
   flex: 1;
   display: flex;
@@ -1448,6 +1452,12 @@ ul, ol { list-style: none; }
   margin: 0 auto;
   padding: 14px 16px 12px;
   gap: 12px;
+  /* Waze: allow full scroll inside app-content */
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .map-header {
@@ -1542,6 +1552,201 @@ ul, ol { list-style: none; }
   .route-swap-button { grid-column: 2; grid-row: 1; }
   .live-route-heading { align-items: flex-start; }
   .live-location-switch { flex-shrink: 0; }
+}
+
+
+/* ── Waze-style Map Enhancements ── */
+.waze-search-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--c-white);
+  border: 1px solid var(--c-line);
+  border-radius: 18px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 8px 24px rgba(24,69,45,0.08);
+}
+.waze-search-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+.waze-search-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #F3F7F4;
+  border: 1px solid #E0E8E0;
+  border-radius: 14px;
+  padding: 0 10px;
+  min-height: 42px;
+}
+.waze-search-input-wrap:focus-within { border-color: var(--c-green); box-shadow: 0 0 0 3px rgba(25,122,77,0.12); }
+.waze-search-input-wrap input {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+.waze-search-input-wrap input::placeholder { color: #8A948D; }
+.waze-search-go { min-height: 42px; padding: 0 16px; border-radius: 14px; background: var(--c-green); color: white; font-weight: 900; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+.waze-search-go:disabled { opacity: 0.45; }
+.waze-quick-pills { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.waze-quick-pills::-webkit-scrollbar { display: none; }
+.waze-quick-pill {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #F3F7F4;
+  border: 1px solid #E0E8E0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--c-body);
+  white-space: nowrap;
+}
+.waze-quick-pill-active { background: var(--c-green); border-color: var(--c-green); color: white; }
+.waze-search-results { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+.waze-search-result {
+  display: grid;
+  grid-template-columns: 36px minmax(0,1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border-radius: 12px;
+  background: #F9FBFA;
+  border: 1px solid #EEF2EF;
+  text-align: left;
+}
+.waze-search-result:hover { background: var(--c-pale); border-color: #C3E6D2; }
+.waze-search-result strong { font-size: 13px; line-height: 17px; }
+.waze-search-result span { font-size: 11px; color: var(--c-muted); }
+
+.waze-map-wrap { position: relative; border-radius: 20px; overflow: hidden; }
+.waze-fabs {
+  position: absolute;
+  right: 10px;
+  bottom: 14px;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.waze-fab {
+  width: 44px; height: 44px;
+  border-radius: 14px;
+  background: white;
+  border: 1px solid #E1E9E3;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.16);
+  display: flex; align-items: center; justify-content: center;
+}
+.waze-fab-active { background: var(--c-green); color: white; border-color: var(--c-green); }
+.waze-fab-follow-active { background: #1A73E8; color: white; border-color: #1A73E8; }
+.waze-style-chips {
+  position: absolute;
+  left: 10px;
+  bottom: 14px;
+  z-index: 500;
+  display: flex;
+  gap: 6px;
+}
+.waze-style-chip {
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.96);
+  border: 1px solid #E1E9E3;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+  font-size: 11px;
+  font-weight: 900;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.waze-style-chip-active { background: var(--c-ink); color: white; border-color: var(--c-ink); }
+
+.waze-speed-badge {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(18,41,30,0.92);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 14px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.22);
+  backdrop-filter: blur(8px);
+}
+.waze-speed-badge strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.waze-speed-badge span { font-size: 10px; font-weight: 800; letter-spacing: 0.6px; opacity: 0.9; }
+
+.waze-steps-sheet {
+  background: white;
+  border: 1px solid #E1E9E3;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+}
+.waze-steps-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--c-ink);
+}
+.waze-step {
+  display: grid;
+  grid-template-columns: 30px minmax(0,1fr) auto;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid #EEF2EF;
+  align-items: center;
+}
+.waze-step:first-child { border-top: 0; }
+.waze-step strong { font-size: 12px; line-height: 16px; }
+.waze-step small { font-size: 11px; color: var(--c-muted); }
+.waze-eta-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #12291E;
+  color: white;
+  border-radius: 14px;
+}
+.waze-eta-strip strong { font-size: 14px; }
+.waze-eta-strip span { font-size: 11px; opacity: 0.85; }
+.waze-report-bar {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.waze-report-btn {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #FFF7ED;
+  border: 1px solid #FDBA74;
+  color: #9A3412;
+  font-size: 11px;
+  font-weight: 800;
+  display: inline-flex; align-items: center; gap: 6px;
 }
 
 /* ── Emergency ── */
@@ -2501,4 +2706,44 @@ ul, ol { list-style: none; }
   .business-scan-button { justify-content: center; }
   .business-visitor-stats strong { font-size: 20px; }
   .business-tab span:last-child { font-size: 7px; letter-spacing: 0; }
+}
+
+/* ── Booking & In-App Payment (Hilinga) ── */
+.booking-flow { display: flex; flex-direction: column; gap: 14px; }
+.booking-flow-hero { padding: 14px; border-radius: 16px; background: linear-gradient(135deg, #12291E 0%, #1A3D2D 100%); color: white; display: flex; flex-direction: column; gap: 4px; }
+.booking-flow-hero .eyebrow { color: #A4E5C1; font-size: 9px; font-weight: 900; letter-spacing: .9px; }
+.booking-flow-hero h3 { font-size: 18px; line-height: 22px; }
+.booking-flow-hero p { color: #DCEFE4; font-size: 11px; line-height: 16px; }
+.booking-grid { display: flex; flex-direction: column; gap: 12px; }
+.booking-price-card { padding: 14px; border-radius: 14px; background: #F9FCFA; border: 1px solid #E1E9E3; display: flex; flex-direction: column; gap: 8px; }
+.booking-price-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--c-body); }
+.booking-price-row span:first-child { font-weight: 700; }
+.booking-price-total { display: flex; justify-content: space-between; align-items: center; padding-top: 8px; border-top: 1px solid var(--c-line); font-size: 15px; }
+.booking-price-note { display: flex; gap: 6px; align-items: center; color: var(--c-muted); font-size: 11px; line-height: 15px; margin-top: 2px; }
+.payment-methods { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pay-method, .pay-method-active { min-height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12px; font-weight: 900; border: 1px solid var(--c-line); background: white; }
+.pay-method-active { background: var(--c-green); border-color: var(--c-green); color: white; }
+.planner-bookings-section { margin-top: 6px; }
+.my-booking-card { border: 1px solid #E1E9E3; }
+.my-bookings-list { gap: 12px; }
+
+/* booking/payment responsive */
+@media (max-width: 540px) {
+  .payment-methods { grid-template-columns: 1fr; }
+}
+
+
+/* Explore: reviewer nationality flag badge */
+.review-nationality-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--c-bg, #f3f4f6);
+  border: 1px solid var(--c-line, #e5e7eb);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  white-space: nowrap;
 }

@@ -154,7 +154,7 @@ function fromSupabasePaymentRow(row: SupabasePaymentRow): PaymentTransaction {
     bookingId: row.booking_id ?? '',
     userId: row.user_id,
     amount: row.amount ?? 0,
-    currency: row.currency ?? 'USD',
+    currency: row.currency ?? 'PHP',
     status: (row.status as PaymentStatus) ?? 'pending',
     method: (row.method as PaymentMethod) ?? 'credit_card',
     transactionId: row.transaction_id ?? undefined,
@@ -204,7 +204,7 @@ function fromSupabaseBookingRow(row: SupabaseBookingRow): Booking {
       taxes: 0,
       fees: 0,
       total: 0,
-      currencyCode: 'USD',
+      currencyCode: 'PHP',
       breakdown: [],
     },
     paymentId: row.payment_id ?? undefined,
@@ -321,7 +321,7 @@ export class PaymentService {
     startDate: string,
     endDate: string,
     basePrice: number,
-    currency: string = 'USD'
+    currency: string = 'PHP'
   ): Promise<Booking> {
     const bookingId = `booking_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const confirmationNumber = `HNG-${Date.now()}-${Math.random().toString(36).substr(2, 5).toUpperCase()}`;

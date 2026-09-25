@@ -251,7 +251,7 @@ export function generateConfirmationNumber(): string {
 
 export function calculateTotalPrice(
   basePrice: number,
-  taxRate: number = 0.1,
+  taxRate: number = 0.12,
   serviceFeesRate: number = 0.05,
 ): PriceBreakdown {
   const taxes = basePrice * taxRate;
@@ -263,7 +263,7 @@ export function calculateTotalPrice(
     taxes,
     fees,
     total,
-    currencyCode: "USD",
+    currencyCode: "PHP",
     breakdown: [
       { label: "Base Price", amount: basePrice },
       { label: "Taxes", amount: taxes },

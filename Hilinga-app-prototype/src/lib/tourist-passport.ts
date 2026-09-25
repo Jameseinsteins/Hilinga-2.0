@@ -323,7 +323,7 @@ export async function ensureTouristPassport(
   ownerUid: string,
   displayName: string,
   profilePhoto = "",
-  accountProfile: { language?: string; interests?: string[] } = {},
+  accountProfile: { language?: string; interests?: string[]; nationality?: string; country?: string; country_iso2?: string } = {},
 ) {
   const existing = await getTouristPassport(ownerUid);
   const normalizedName = displayName.trim();
@@ -336,6 +336,8 @@ export async function ensureTouristPassport(
         profilePhoto: profilePhoto || existing.profilePhoto,
         language: accountProfile.language || existing.language,
         interests: accountProfile.interests ?? existing.interests,
+        nationality: accountProfile.nationality || existing.nationality,
+        country: accountProfile.country || existing.country,
       }),
     );
   }
@@ -347,6 +349,8 @@ export async function ensureTouristPassport(
     profilePhoto,
     language: accountProfile.language || "English",
     interests: accountProfile.interests ?? [],
+    nationality: accountProfile.nationality || "Filipino",
+    country: accountProfile.country || "Philippines",
     qrStatus: "disabled",
     consentEnabled: false,
   });
@@ -378,15 +382,70 @@ export async function setTouristQrStatus(ownerUid: string, status: TouristQrStat
 
 export function tokenFromTouristQrValue(value: string) {
   const trimmed = value.trim();
-  const match = trimmed.match(/(?:qr\/(?:profile|tourist)\/|(?:profile_qr|tourist_token)=|hilinga:(?:profile|tourist):)([A-Za-z0-9]+)/i);
-  return match?.[1] || trimmed.replace(/[^A-Za-z0-9]/g, "");
+  if (!trimmed) return "";
+  // Try to parse as URL first — handles http://host/?profile_qr=TOKEN#business/visitors
+  try {
+    const url = new URL(trimmed, "https://hilinga.app");
+    const paramToken = url.searchParams.get("profile_qr") || url.searchParams.get("tourist_token") || url.searchParams.get("qr_token") || url.searchParams.get("token");
+    if (paramToken) {
+      const cleaned = paramToken.replace(/[^A-Za-z0-9]/g, "");
+      if (cleaned) return cleaned;
+    }
+    // also check hash fragment for token
+    if (url.hash) {
+      const hashMatch = url.hash.match(/(?:profile_qr|tourist_token|qr_token|token)=([A-Za-z0-9]+)/i);
+      if (hashMatch?.[1]) return hashMatch[1];
+    }
+  } catch {}
+  const match = trimmed.match(/(?:qr\/(?:profile|tourist)\/|(?:profile_qr|tourist_token|qr_token|token)=|hilinga:(?:profile|tourist):)([A-Za-z0-9]+)/i);
+  if (match?.[1]) return match[1];
+  // If it looks like a plain HLG tourist code, return it as-is (handled by resolveTouristQr fallback)
+  const hlgMatch = trimmed.match(/HLG\s*-\s*U\s*-?\s*\d{4,8}/i);
+  if (hlgMatch) return hlgMatch[0].replace(/[^A-Za-z0-9]/g, "");
+  return trimmed.replace(/[^A-Za-z0-9]/g, "");
 }
 
 export async function resolveTouristQr(value: string) {
   requireSupabase();
-  const token = tokenFromTouristQrValue(value);
+  let token = tokenFromTouristQrValue(value);
+  // Allow HLG tourist code as alternative input (e.g. HLG-U-123456) — resolve via tourist_profiles
+  const isHlgCode = /^HLG[A-Za-z0-9]{6,12}$/i.test(token) || /^HLGU\d{4,8}$/i.test(token);
+  if (isHlgCode) {
+    // Try lookup by tourist_code directly
+    try {
+      const { data: codeData, error: codeError } = (await withSupabaseTimeout(
+        supabase!.from("tourist_profiles").select("*").eq("tourist_code", token).maybeSingle(),
+        "Supabase tourist code lookup timed out.",
+      )) as { data: TouristProfileRow | null; error: { message: string } | null };
+      if (!codeError && codeData) {
+        const passportByCode = supabaseRowToPassport(codeData);
+        if (passportByCode.qrStatus === "active" && passportByCode.consentEnabled) {
+          // verify QR is still active in qr_codes table
+          const { data: qrCheck } = (await withSupabaseTimeout(
+            supabase!.from("tourist_qr_codes").select("*").eq("qr_token", passportByCode.qrToken).maybeSingle(),
+            "Supabase QR check timed out.",
+          )) as { data: TouristQrCodeRow | null; error: { message: string } | null };
+          if (qrCheck && qrCheck.status === "active") return passportByCode;
+        }
+      }
+      // also try with dash format HLG-U-xxxxxx
+      const dashed = token.replace(/^HLGU/i, "HLG-U-");
+      if (dashed !== token) {
+        const { data: codeData2 } = (await withSupabaseTimeout(
+          supabase!.from("tourist_profiles").select("*").eq("tourist_code", dashed).maybeSingle(),
+          "Supabase tourist code lookup timed out.",
+        )) as { data: TouristProfileRow | null; error: { message: string } | null };
+        if (codeData2) {
+          const passportByCode2 = supabaseRowToPassport(codeData2);
+          if (passportByCode2.qrStatus === "active" && passportByCode2.consentEnabled) return passportByCode2;
+        }
+      }
+    } catch {}
+    // fall through to token error with helpful message
+    throw new Error("That HLG code was not found or is not active. Use the QR link or 32-character token shown with your Profile QR.");
+  }
   if (!/^[A-Za-z0-9]{24,128}$/.test(token)) {
-    throw new Error("That QR code does not contain a valid Hilinga profile token.");
+    throw new Error("That QR code does not contain a valid Hilinga profile token. Paste the full QR link (with profile_qr=...) or the 32-character token — not just the HLG-U-... display code.");
   }
   const { data: qrData, error: qrError } = (await withSupabaseTimeout(
     supabase!.from("tourist_qr_codes").select("*").eq("qr_token", token).maybeSingle(),
