@@ -1,4 +1,4 @@
-import { applyApiHeaders, createRequestId, sendError } from "./_lib/http";
+import { applyApiHeaders, createRequestId, sendError } from "./_lib/http.js";
 
 export default function handler(req: any, res: any) {
   const requestId = createRequestId();

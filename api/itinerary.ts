@@ -1,6 +1,6 @@
-import { ApiAuthenticationError, authenticateFirebaseRequest } from "./_lib/firebase-auth";
-import { applyApiHeaders, createRequestId, isJsonRequest, sendError, serializedByteLength } from "./_lib/http";
-import { takeRateLimit } from "./_lib/rate-limit";
+import { ApiAuthenticationError, authenticateFirebaseRequest } from "./_lib/firebase-auth.js";
+import { applyApiHeaders, createRequestId, isJsonRequest, sendError, serializedByteLength } from "./_lib/http.js";
+import { takeRateLimit } from "./_lib/rate-limit.js";
 import {
   cleanText,
   sanitizeBusinesses,
@@ -10,8 +10,8 @@ import {
   normalizeAndValidateItinerary,
   extractJson,
   parseDayCountFromPrompt,
-} from "./_lib/itinerary-prompt";
-import { CATALOG_TITLES, buildAllowlist, enforceAllowlist } from "./_lib/allowlist";
+} from "./_lib/itinerary-prompt.js";
+import { CATALOG_TITLES, buildAllowlist, enforceAllowlist } from "./_lib/allowlist.js";
 
 const MAX_BODY_BYTES = 32_000;
 const MAX_DAYS = 7;
