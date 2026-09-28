@@ -7,5 +7,6 @@
     "lint": "npm --prefix Hilinga-app-prototype run lint",
     "typecheck": "npm --prefix Hilinga-app-prototype run typecheck && npm --prefix Hilinga-app-prototype run typecheck:api",
     "preview": "npm --prefix Hilinga-app-prototype run preview"
-  }
+  },
+  "type": "module"
 }
