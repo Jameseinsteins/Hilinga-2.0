@@ -1,9 +1,35 @@
+# env - never commit (Vercel injects these in prod)
 .env
+.env.local
+.env.*.local
+!.env.example
+
+# vercel
 .vercel
+
+# firebase / service accounts - never commit
 serviceAccountKey.json
 *-key.json
 *firebase-adminsdk*.json
 service-account*.json
 
-.vercel
-.env*
+# build / deps
+dist/
+node_modules/
+tmp-env*
+hilinga-env-decrypted*
+
+# OS / editor
+.DS_Store
+*.pem
+*.tsbuildinfo
+.vscode/
+
+# backups / swap - never commit
+*.bak
+*.backup
+*.orig
+*.tmp
+*.disabled
+*~
+*.swp
