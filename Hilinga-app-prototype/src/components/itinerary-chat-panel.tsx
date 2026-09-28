@@ -5,69 +5,10 @@ import { readRegisteredSmallBusinesses } from "@/lib/business-content";
 import type { ItineraryDay } from "@/lib/database";
 import { SkeletonItinerary } from "@/components/skeleton";
 import { Tooltip } from "@/components/tooltip";
+import { PostcardTimeline } from "@/components/itinerary-postcard-timeline";
 
 function Icon({ name, size = 18, color, filled }: { name: string; size?: number; color?: string; filled?: boolean }) {
   return <span className={`material-symbols-outlined ${filled ? "icon-filled" : ""}`} style={{ fontSize: size, color }}>{name}</span>;
-}
-
-function ItineraryCard({ itinerary, budgetText, onExclude, onReplaceStop, compact }: {
-  itinerary: ItineraryDay[];
-  budgetText?: string | number | null;
-  onExclude?: (title: string) => void;
-  onReplaceStop?: (day: number, stopIndex: number, title: string) => void;
-  compact?: boolean;
-}) {
-  const bizNames = new Set(readRegisteredSmallBusinesses().map((b) => b.name.toLowerCase().trim()));
-  const budgetLabel = !budgetText ? "Moderate (₱700–₱1,500 / person)" : typeof budgetText === "number" ? `₱${budgetText.toLocaleString()} Total` : budgetText === "Budget" ? "₱300–₱700 / person (Budget)" : budgetText === "Premium" ? "₱1,500+ / person (Premium)" : String(budgetText);
-  return (
-    <div className={`itinerary-preview ${compact ? "itinerary-preview-compact" : ""}`}>
-      {!compact && (
-        <div className="itinerary-budget-banner">
-          <div className="itinerary-budget-icon"><Icon name="account_balance_wallet" size={18} color="white" /></div>
-          <div className="itinerary-budget-copy"><span className="itinerary-budget-label">Trip Budget</span><strong>{budgetLabel}</strong></div>
-        </div>
-      )}
-      {itinerary.map((day) => (
-        <div className="itinerary-day" key={day.day}>
-          <div className="itinerary-day-heading"><span>Day {day.day}</span><strong>{day.title}</strong></div>
-          <div className="itinerary-timeline">
-            {day.stops.map((stop, si) => {
-              const isBiz = bizNames.has(stop.title.toLowerCase().trim()) || stop.note.includes("registered Hilinga small business");
-              return (
-                <div className="itinerary-stop" key={`${day.day}-${si}-${stop.title}`}>
-                  <div className="itinerary-stop-icon"><Icon name={stop.icon} size={16} color="var(--c-green)" /></div>
-                  <div className="itinerary-stop-copy">
-                    <span>{stop.time}</span>
-                    {isBiz && <span className="itinerary-business-badge"><Icon name="verified" size={12} color="var(--c-green)" filled /> Registered Local Business</span>}
-                    <strong>{stop.title}</strong>
-                    {!compact && <p>{stop.note}</p>}
-                    {(onReplaceStop || onExclude) && (
-                      <div className="itinerary-actions-row">
-                        {onReplaceStop && (
-                          <Tooltip content={`Replace ${stop.title}`}>
-                            <button type="button" className="itinerary-replace-btn" onClick={() => onReplaceStop(day.day, si, stop.title)} aria-label={`Replace ${stop.title}`}>
-                              <Icon name="swap_horiz" size={14} /> Replace
-                            </button>
-                          </Tooltip>
-                        )}
-                        {onExclude && (
-                          <Tooltip content={`Remove ${stop.title}`}>
-                            <button type="button" className="itinerary-exclude" onClick={() => onExclude(stop.title)} aria-label={`Remove ${stop.title}`}>
-                              <Icon name="remove_circle" size={14} /> Remove
-                            </button>
-                          </Tooltip>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 export function ItineraryChatPanel({
@@ -125,7 +66,6 @@ export function ItineraryChatPanel({
       };
       setMessages((prev) => prev.map((m) => m.id === pendingId ? assistant : m));
     } catch (e: any) {
-      // fallback to local builder so user still gets an itinerary
       const businesses = readRegisteredSmallBusinesses();
       const fallback = buildPromptItinerary(text, days, budget, pace, businesses);
       const assistant: ChatMessage = {
@@ -216,9 +156,11 @@ export function ItineraryChatPanel({
               )}
               {m.itinerary && m.itinerary.length > 0 && (
                 <div className="card" style={{ padding: 12 }}>
-                  <ItineraryCard
+                  <PostcardTimeline
                     itinerary={m.itinerary}
                     budgetText={budget}
+                    title={messages.find((x) => x.role === "user")?.content?.slice(0, 44) || "Albay Adventure"}
+                    qrPayload={typeof window !== "undefined" ? window.location.href : undefined}
                     onExclude={excludeFromLast}
                     onReplaceStop={(day, idx, title) => setReplaceTarget({ day, stopIndex: idx, title })}
                   />

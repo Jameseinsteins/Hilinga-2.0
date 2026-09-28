@@ -840,10 +840,6 @@ export function subscribeToOwnedBusinessPage(
   return supabaseSubscribeToOwnedBusinessPage(ownerUid, onPage, onError);
 }
 
-function toBusinessPost(id: string, value: Omit<BusinessPost, "id">): BusinessPost {
-  return { ...value, id };
-}
-
 export async function publishBusinessPost(input: PublishBusinessPostInput) {
   requireSupabase();
   return supabasePublishBusinessPost(input);
@@ -1216,7 +1212,7 @@ export async function submitBusinessVerification(ownerUid: string, payload: Subm
   };
   let usedFallback = false;
   try {
-    const { error, count } = await withSupabaseTimeout(
+    const { error } = await withSupabaseTimeout(
       (supabase!.from("businesses").update(updatePayload as never).eq("owner_uid", ownerUid) as unknown as PromiseLike<{ error: { message: string } | null; count?: number }>),
       "Verification submission timed out."
     );
@@ -1467,14 +1463,6 @@ export async function fetchAllBusinessesForAdmin(): Promise<RegisteredSmallBusin
     );
     if (error) {
       if (isMissingColumnError(error)) {
-        // Fallback: return all businesses enriched with storage payloads where available
-        const { data: baseData, error: baseError } = await withSupabaseTimeout(
-          supabase!.from("businesses").select("*").order("created_at", { ascending: false }),
-          "Supabase businesses fetch (fallback base) timed out.",
-        );
-        // Actually if columns missing, the above request with * should succeed because it returns all columns that exist — but verification cols missing.
-        // The error path here is unlikely; instead we handle the case where select("*") succeeds but businessRowToRegistered defaults.
-        // To handle fallback properly, fetch base rows without verification filter and merge
         throw new Error(error.message);
       }
       throw new Error(error.message);

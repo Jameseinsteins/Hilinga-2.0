@@ -496,12 +496,6 @@ export class PaymentService {
           updated_at: String(Date.now()),
           sync_state: 'synced',
         };
-        const completedFallback = {
-          status: 'completed',
-          transactionId: result.transactionId,
-          processedAt: Date.now(),
-          updatedAt: Date.now(),
-        };
                 await supabasePatchPayment(userId, paymentId, completedSnake);
 
         // Get booking and update status
@@ -716,7 +710,8 @@ export class PaymentService {
   /**
    * Record payment transaction
    */
-  private async recordPayment(userId: string, payment: PaymentTransaction): Promise<void> {
+  private async recordPayment(_userId: string, payment: PaymentTransaction): Promise<void> {
+    void _userId;
     requireSupabase();
     await supabaseUpsertPayment(payment);
   }

@@ -43,13 +43,6 @@ type CachedItineraryEdit = {
   syncState: SyncState;
 };
 
-function requireSupabase() {
-  if (!isSupabaseConfigured || !supabase) {
-    console.warn("[booking-system] Supabase not configured — working offline (IndexedDB only).");
-    return;
-  }
-}
-
 function hasCloud(): boolean {
   return Boolean(isSupabaseConfigured && supabase);
 }

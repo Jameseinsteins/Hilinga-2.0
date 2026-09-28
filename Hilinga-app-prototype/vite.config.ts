@@ -308,10 +308,25 @@ export default defineConfig({
   },
   preview: { host: true, port: 5173 },
   build: {
+    cssCodeSplit: true,
+    chunkSizeWarningLimit: 700,
+    assetsInlineLimit: 4096,
     rollupOptions: {
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
         admin: fileURLToPath(new URL('./admin.html', import.meta.url)),
+      },
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('firebase')) return 'vendor-firebase';
+          if (id.includes('@supabase')) return 'vendor-supabase';
+          if (id.includes('leaflet')) return 'vendor-leaflet';
+          if (id.includes('qrcode')) return 'vendor-qrcode';
+          if (id.includes('react')) return 'vendor-react';
+          // exceljs is now dynamically imported — keep it separate if statically pulled
+          if (id.includes('exceljs')) return 'vendor-exceljs';
+        },
       },
     },
   },

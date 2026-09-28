@@ -9,7 +9,7 @@ import {
 } from "@/lib/auth";
 import { getLastAccountMode, selectAccountMode, type AccountMode } from "@/lib/account-mode";
 
-import welcomeBg from "@/assets/images/hilinga/welcome-bg.png";
+import welcomeBg from "@/assets/images/hilinga/welcome-bg.jpg";
 import hilingaLogo from "@/assets/images/hilinga/hilinga-logo.png";
 
 type Mode = "login" | "signup" | "forgot";

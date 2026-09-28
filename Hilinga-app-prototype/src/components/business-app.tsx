@@ -9,7 +9,6 @@ import {
   BUSINESS_CONTENT_CHANGED_EVENT,
   ensureBusinessPage,
   getBusinessVerificationStatus,
-  requestBusinessVerification,
   readRegisteredBusinesses,
   subscribeToRegisteredBusinesses,
   publishBusinessPost,
@@ -19,7 +18,6 @@ import {
   type BusinessPageInfo,
   type BusinessPostCategory,
   type BusinessVerificationInfo,
-  type BusinessVerificationStatus,
   type BusinessVerificationPayload,
   type StoredBusinessItem,
 } from "@/lib/business-content";
@@ -143,7 +141,6 @@ function BusinessAppShell() {
   const [pageSaving, setPageSaving] = useState(false);
   const [verification, setVerification] = useState<BusinessVerificationInfo | null>(null);
   const [verificationLoading, setVerificationLoading] = useState(true);
-  const [verificationActionLoading, setVerificationActionLoading] = useState(false);
   const [verificationError, setVerificationError] = useState("");
   const [kycOpen, setKycOpen] = useState(false);
   // hydrated from cache for the modal
@@ -293,22 +290,6 @@ function BusinessAppShell() {
     };
   }, [user?.uid]);
 
-  async function handleRequestVerification() {
-    if (!user?.uid || verificationActionLoading) return;
-    setVerificationActionLoading(true);
-    setVerificationError("");
-    try {
-      await requestBusinessVerification(user.uid);
-      const v = await getBusinessVerificationStatus(user.uid).catch(() => null);
-      if (v) setVerification(v);
-      else setVerification({ status: "pending" });
-      window.dispatchEvent(new Event(BUSINESS_CONTENT_CHANGED_EVENT));
-    } catch (err) {
-      setVerificationError(err instanceof Error ? err.message : "Verification request failed. Try again.");
-    } finally {
-      setVerificationActionLoading(false);
-    }
-  }
 
 
   function navigate(next: BusinessTab) {

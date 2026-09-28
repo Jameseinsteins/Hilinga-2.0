@@ -4,6 +4,7 @@ import {
   subscribeToAdminAnalytics,
   type AdminTouristStats,
 } from "@/lib/analytics-service";
+import { downloadAdminExcel } from "@/lib/admin-excel-export";
 import {
   fetchAllBusinessesForAdmin,
   fetchPendingBusinesses,
@@ -25,25 +26,6 @@ function Icon({ name, size = 24 }: { name: string; size?: number }) {
 function formatMonth(monthStr: string): string {
   const date = new Date(`${monthStr}-01`);
   return date.toLocaleDateString("en-PH", { month: "short", year: "numeric" });
-}
-
-function downloadCSV(stats: AdminTouristStats) {
-  const headers = ["Month", "Tourist Arrivals"];
-  const rows = stats.monthlyTrend.map((item) => [
-    formatMonth(item.month),
-    item.count.toString(),
-  ]);
-
-  const csv = [headers, ...rows].map((row) => row.join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", `hilinga-tourism-report-${new Date().toISOString().split("T")[0]}.csv`);
-  link.style.visibility = "hidden";
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
 }
 
 function MonthlyTrendChart({ data }: { data: Array<{ month: string; count: number }> }) {
@@ -415,7 +397,7 @@ export function AdminDashboard() {
         </div>
         {stats && (
           <button
-            onClick={() => downloadCSV(stats)}
+            onClick={() => { void downloadAdminExcel(stats); }}
             style={{
               padding: "12px 20px",
               backgroundColor: "var(--c-green)",
@@ -428,7 +410,7 @@ export function AdminDashboard() {
             }}
           >
             <Icon name="download" size={20} />
-            Export CSV
+            Export Excel
           </button>
         )}
       </header>

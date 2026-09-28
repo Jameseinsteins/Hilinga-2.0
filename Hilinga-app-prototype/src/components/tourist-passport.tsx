@@ -11,19 +11,12 @@ import {
   type TouristVisit,
 } from "@/lib/tourist-passport";
 import { generateQrDataUrl, downloadQrDataUrl } from "@/lib/qr-generator";
+import { PassportStampBook } from "@/components/passport-stamp-book";
 
 type QrImageState = "idle" | "generating" | "ready" | "error";
 
 function Icon({ name, size = 22 }: { name: string; size?: number }) {
   return <span className="material-symbols-outlined" style={{ fontSize: size }} aria-hidden="true">{name}</span>;
-}
-
-function dateLabel(value: string) {
-  return new Intl.DateTimeFormat("en-PH", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
-}
-
-function timeLabel(value: string) {
-  return new Intl.DateTimeFormat("en-PH", { hour: "numeric", minute: "2-digit" }).format(new Date(value));
 }
 
 export function ProfileQrCard() {
@@ -204,16 +197,13 @@ export function ProfileQrCard() {
         <p className="passport-profile-source"><Icon name="sync" size={16} /> Name, photo, language, and interests stay synchronized with your Hilinga profile.</p>
       </section>
 
-      <section className="passport-visits" aria-labelledby="passport-visits-title" aria-busy={visitsLoading}>
-        <div className="passport-section-heading"><div><span>YOUR TRAVEL RECORD</span><h3 id="passport-visits-title">My Visits</h3></div><span>{visits.length}</span></div>
-        {visitsLoading
-          ? <div className="passport-empty"><div className="spinner" /><span>Loading your travel logbook…</span></div>
-          : visitsError
-            ? <div className="passport-empty passport-visits-error"><Icon name="error" size={28} /><span>{visitsError}</span></div>
-            : visits.length === 0
-              ? <div className="passport-empty"><Icon name="travel_explore" size={28} /><span>Your Hilinga visits will appear here after a business scans your Profile QR.</span></div>
-              : <div className="passport-visit-list">{visits.map((visit) => <article key={visit.id}><span className="passport-visit-icon"><Icon name="storefront" size={18} /></span><div><strong>{visit.businessName}</strong><span>{[visit.businessLocation, `${dateLabel(visit.visitedAt)} · ${timeLabel(visit.visitedAt)}`].filter(Boolean).join(" · ")}</span></div><Icon name="check_circle" size={18} /></article>)}</div>}
-      </section>
+      <PassportStampBook
+        visits={visits}
+        visitsLoading={visitsLoading}
+        visitsError={visitsError}
+        passport={passport}
+        fullName={fullName}
+      />
 
       {fullscreen && qrReady ? <div className="passport-fullscreen" onClick={() => setFullscreen(false)}><div className="passport-fullscreen-inner" role="dialog" aria-modal="true" aria-labelledby="fullscreen-passport-title" onClick={(event) => event.stopPropagation()}><button className="passport-close" onClick={() => setFullscreen(false)} aria-label="Close full screen QR"><Icon name="close" size={23} /></button><span className="passport-kicker">MY PROFILE QR</span><h2 id="fullscreen-passport-title">{fullName}</h2><img src={qrImage} alt="Fullscreen Profile QR" /><strong>{passport.touristCode}</strong><p>Present this Profile QR to a registered Hilinga business.</p></div></div> : null}
     </>

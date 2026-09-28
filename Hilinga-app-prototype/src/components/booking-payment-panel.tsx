@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ItineraryDay, TripPlan } from "@/lib/database";
+import type { TripPlan } from "@/lib/database";
 import { getTripPlans, updateTripPlan } from "@/lib/cloud-user-data";
 import {
   cancelBooking as cancelBookingRow,

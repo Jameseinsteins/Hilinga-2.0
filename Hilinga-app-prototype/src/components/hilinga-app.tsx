@@ -1,11 +1,13 @@
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { MapPlace, MapRouteStop, MapTerminal, OpenStreetMap, type RouteStep } from "@/components/openstreet-map";
+import { catalog, savedImages } from "@/lib/catalog";
+import { AlbayNowTicker } from "@/components/AlbayNowTicker";
+import { useNightMode } from "@/hooks/useNightMode";
+import { haptic } from "@/lib/haptics";
 import { BusinessRegistrationDashboard } from "@/components/business-registration-dashboard";
 import { KeepAliveTab, ViewCacheProvider, useViewCache } from "@/hooks/useViewCache";
-// NOTE: MapScreen and ExploreScreen need API fixes - temporarily disabled
-// import { MapScreen } from "@/components/screens/MapScreen";
-// import { ExploreScreen } from "@/components/screens/ExploreScreen";
+import { MapScreen } from "@/components/screens/MapScreen";
+import { Explore } from "@/components/screens/ExploreScreen";
 
 import {
   ItineraryDay,
@@ -20,42 +22,27 @@ import {
 import {
   createTripPlan,
   deleteTripPlan,
-  getSavedIds,
   getSavedItems,
   getTripPlans,
   removeSavedItem,
-  saveItem,
-  updateTripPlan,
 } from "@/lib/cloud-user-data";
 import type { AvatarUpload } from "@/lib/cloud-profile";
 import { generateAiItinerary } from "@/lib/ai-itinerary";
 import { ItineraryChatPanel } from "@/components/itinerary-chat-panel";
+import { PostcardTimeline } from "@/components/itinerary-postcard-timeline";
 import { SkeletonPlanner, SkeletonProfile, SkeletonSaved } from "@/components/skeleton";
 import { Tooltip } from "@/components/tooltip";
-import { NATIONALITY_OPTIONS, countryToFlag, formatNationality, iso2ToFlag } from "@/lib/nationality";
+import { NATIONALITY_OPTIONS, iso2ToFlag } from "@/lib/nationality";
 import {
   BUSINESS_CONTENT_CHANGED_EVENT,
   BusinessPost,
   RegisteredSmallBusiness,
-  readPublishedBusinessPosts,
-  readRegisteredBusinesses,
-  readRegisteredSmallBusinesses,
   readVerifiedBusinessPosts,
-  readVerifiedRegisteredBusinesses,
   readVerifiedSmallBusinesses,
   subscribeToPublishedBusinessPosts,
   subscribeToRegisteredBusinesses,
 } from "@/lib/business-content";
 import {
-  CommunityPost,
-  createCommunityPost,
-  deleteCommunityPost,
-  type ExperienceCategory,
-  subscribeToCommunityPosts,
-} from "@/lib/community-feed";
-import {
-  recordBusinessProfileView,
-  sendBusinessInquiry,
   setBusinessPostLiked,
   subscribeToLikedBusinessPosts,
 } from "@/lib/business-engagement";
@@ -66,157 +53,22 @@ import { AccountSecurityCard } from "@/components/account-security-card";
 import { BookingFlowModal, ItineraryEditModal, MyBookingsSection, PaymentPanelModal } from "@/components/booking-payment-panel";
 import type { Booking } from "@/lib/payment-system";
 
-import explore1 from "@/assets/images/hilinga/explore-1.png";
-import explore2 from "@/assets/images/hilinga/explore-2.png";
-import explore3 from "@/assets/images/hilinga/explore-3.png";
 import explore4 from "@/assets/images/hilinga/explore-4.png";
 import explore5 from "@/assets/images/hilinga/explore-5.png";
 import explore6 from "@/assets/images/hilinga/explore-6.png";
-import iconExploreNearby from "@/assets/svg/explore-nearby-icon.svg";
-import iconAiItinerary from "@/assets/svg/ai-itinerary-icon.svg";
-import iconFoodCafe from "@/assets/svg/food-cafe-icon.svg";
-import iconEvents from "@/assets/svg/events-icon.svg";
-import iconTransportation from "@/assets/svg/transportation-icon.svg";
-import iconMap from "@/assets/svg/map-icon.svg";
-import iconStay from "@/assets/svg/stay-icon.svg";
-import iconEmergency from "@/assets/svg/emergency-icon.svg";
+import iconExploreNearby from "@/assets/icons/explore-nearby-icon.png";
+import iconAiItinerary from "@/assets/icons/ai-itinerary-icon.png";
+import iconFoodCafe from "@/assets/icons/food-cafe-icon.png";
+import iconEvents from "@/assets/icons/events-icon.png";
+import iconTransportation from "@/assets/icons/transportation-icon.png";
+import iconMap from "@/assets/icons/map-icon.png";
+import iconStay from "@/assets/icons/stay-icon.png";
+import iconEmergency from "@/assets/icons/emergency-icon.png";
 
 type Tab = "Home" | "Explore" | "Planner" | "Feed" | "Profile";
 type Notice = { title: string; message: string } | null;
 
-type ExploreKind = "All" | "Places" | "Businesses" | "Events" | "Experiences";
-type ExploreView = "For you" | "All" | "Latest";
-type BusinessScale = "Small business" | "Big enterprise";
-type ExploreItem = {
-  id: string;
-  name: string;
-  subtitle: string;
-  category: string;
-  kind: Exclude<ExploreKind, "All">;
-  savedKind: SavedKind;
-  visits: number;
-  imageKey: string;
-  source: string;
-  latitude: number;
-  longitude: number;
-  detail?: string;
-  location?: string;
-  logoSource?: string;
-  businessScale?: BusinessScale;
-  registered?: boolean;
-  ownerUid?: string;
-};
 
-const catalog: ExploreItem[] = [
-  { id: "cagsawa-ruins", name: "Cagsawa Ruins", subtitle: "Historic landmark with an iconic Mayon view", category: "Heritage", kind: "Places", savedKind: "Places", visits: 28400, imageKey: "cagsawa", source: explore1, latitude: 13.16606, longitude: 123.70105 },
-  { id: "mayon-skyline", name: "Mayon Skyline", subtitle: "Scenic mountain viewpoint and nature stop", category: "Nature", kind: "Places", savedKind: "Places", visits: 21900, imageKey: "mayon", source: explore2, latitude: 13.28477, longitude: 123.67124 },
-  { id: "sumlang-lake", name: "Sumlang Lake", subtitle: "Lakeside scenery, food, and local crafts", category: "Nature", kind: "Places", savedKind: "Places", visits: 17600, imageKey: "sumlang", source: explore3, latitude: 13.17891, longitude: 123.67148 },
-  { id: "albay-coffee-house", name: "Albay Coffee House", subtitle: "Bicol-grown coffee and freshly baked pastries", category: "Cafes", kind: "Businesses", savedKind: "Businesses", visits: 12800, imageKey: "cafe", source: explore4, latitude: 13.1417, longitude: 123.7416, location: "Old Albay District, Legazpi City", businessScale: "Small business" },
-  { id: "legazpi-local-market", name: "Legazpi Local Market", subtitle: "Regional food, produce, crafts, and local makers", category: "Shopping", kind: "Businesses", savedKind: "Businesses", visits: 15200, imageKey: "market", source: explore6, latitude: 13.1435, longitude: 123.7522, location: "Legazpi Port District, Legazpi City", businessScale: "Small business" },
-  { id: "pacific-mall-legazpi", name: "Pacific Mall Legazpi", subtitle: "Shopping, dining, services, and entertainment", category: "Shopping", kind: "Businesses", savedKind: "Businesses", visits: 18600, imageKey: "market", source: explore6, latitude: 13.1442, longitude: 123.7458, location: "Landco Business Park, Legazpi City", businessScale: "Big enterprise" },
-  { id: "the-oriental-legazpi", name: "The Oriental Legazpi", subtitle: "A hillside stay with sweeping city and Mayon views", category: "Stay", kind: "Businesses", savedKind: "Businesses", visits: 14300, imageKey: "highlands", source: explore5, latitude: 13.1394, longitude: 123.7281, location: "Taysan Hill, Legazpi City", businessScale: "Big enterprise" },
-  { id: "mayon-atv-adventure", name: "Mayon ATV Adventure", subtitle: "Guided lava-trail ride beneath Mayon Volcano", category: "Activities", kind: "Experiences", savedKind: "Places", visits: 11900, imageKey: "highlands", source: explore5, latitude: 13.1722, longitude: 123.6990 },
-  { id: "ibalong-street-festival", name: "Ibalong Street Festival", subtitle: "Masks, music, and performances inspired by the Ibalong epic", category: "Heritage", kind: "Events", savedKind: "Events", visits: 19800, detail: "Aug 22 · 4:00 PM", imageKey: "market", source: explore6, latitude: 13.1390, longitude: 123.7336 },
-  { id: "legazpi-night-market", name: "Legazpi Weekend Night Market", subtitle: "Local food stalls, music, crafts, and homegrown finds", category: "Food", kind: "Events", savedKind: "Events", visits: 7600, detail: "Saturdays · 5:00 PM", imageKey: "cafe", source: explore4, latitude: 13.1390, longitude: 123.7336 },
-];
-
-const routeDestinations = [
-  ...catalog,
-  { id: "bacacay-coast", name: "Bacacay coast and island views", subtitle: "Beach and island route", latitude: 13.2922, longitude: 123.7930 },
-  { id: "mayon-trail", name: "Mayon nature and photography walk", subtitle: "Nature trail and viewpoint", latitude: 13.1574, longitude: 123.7465 },
-  { id: "mayon-atv", name: "Mayon ATV Adventure", subtitle: "Adventure activity", latitude: 13.1722, longitude: 123.6990 },
-  { id: "camalig-food", name: "Market shopping and Bicolano tasting", subtitle: "Food and local market", latitude: 13.1471, longitude: 123.6591 },
-  { id: "albay-museum", name: "Albay arts and museum stop", subtitle: "Arts and culture", latitude: 13.1392, longitude: 123.7345 },
-  { id: "legazpi-market", name: "Local market and crafts", subtitle: "Shopping and crafts", latitude: 13.1435, longitude: 123.7522 },
-  { id: "legazpi-nightlife", name: "Legazpi evening spots", subtitle: "Dining and nightlife", latitude: 13.1458, longitude: 123.7542 },
-  { id: "sumlang-photo", name: "Mayon golden-hour photo stop", subtitle: "Photography viewpoint", latitude: 13.17891, longitude: 123.67148 },
-  { id: "sumlang-wellness", name: "Lakeside rest and wellness break", subtitle: "Wellness and relaxation", latitude: 13.17891, longitude: 123.67148 },
-  { id: "albay-wildlife", name: "Albay Park & Wildlife", subtitle: "Family-friendly attraction", latitude: 13.1396, longitude: 123.7240 },
-  { id: "legazpi-boulevard", name: "Sunset at Legazpi Boulevard", subtitle: "Waterfront experience", latitude: 13.1324, longitude: 123.7565 },
-  { id: "daraga-church", name: "Daraga faith and heritage trail", subtitle: "Heritage and spiritual site", latitude: 13.1477, longitude: 123.7108 },
-  { id: "penaranda-park", name: "Local festival or community event", subtitle: "Community event area", latitude: 13.1390, longitude: 123.7336 },
-  { id: "hidden-gem", name: "Guide-picked Albay hidden gem", subtitle: "Locally recommended stop", latitude: 13.1650, longitude: 123.7270 },
-] as const;
-
-const routeTerminals: Record<string, MapTerminal> = {
-  legazpi: { id: "terminal-legazpi", name: "Ibalong Grand Central Terminal", subtitle: "Main Legazpi transport hub", latitude: 13.1437, longitude: 123.7435, transport: "Jeepney, UV Express, bus, or tricycle" },
-  daraga: { id: "terminal-daraga", name: "Daraga Public Market Terminal", subtitle: "Daraga jeepney and tricycle stop", latitude: 13.1470, longitude: 123.7117, transport: "Daraga jeepney or tricycle" },
-  camalig: { id: "terminal-camalig", name: "Camalig town-center transport stop", subtitle: "Approximate local boarding area", latitude: 13.1481, longitude: 123.6602, transport: "Jeepney or local tricycle" },
-  tabaco: { id: "terminal-tabaco", name: "Tabaco City Central Terminal", subtitle: "Tabaco transport hub", latitude: 13.3590, longitude: 123.7300, transport: "UV Express, jeepney, or tricycle" },
-  bacacay: { id: "terminal-bacacay", name: "Bacacay town-center transport stop", subtitle: "Approximate local boarding area", latitude: 13.2927, longitude: 123.7914, transport: "Jeepney or local tricycle" },
-};
-
-function distanceKm(from: { latitude: number; longitude: number }, to: { latitude: number; longitude: number }) {
-  const radians = (degrees: number) => degrees * Math.PI / 180;
-  const latitudeDelta = radians(to.latitude - from.latitude);
-  const longitudeDelta = radians(to.longitude - from.longitude);
-  const a = Math.sin(latitudeDelta / 2) ** 2 + Math.cos(radians(from.latitude)) * Math.cos(radians(to.latitude)) * Math.sin(longitudeDelta / 2) ** 2;
-  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function resolveRouteDestination(title: string) {
-  const normalized = title.toLowerCase();
-  const registeredBiz = readVerifiedSmallBusinesses();
-  const bizMatch = registeredBiz.find((biz) => normalized.includes(biz.name.toLowerCase()) || biz.name.toLowerCase().includes(normalized));
-  if (bizMatch) {
-    return {
-      id: `registered-${bizMatch.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
-      name: bizMatch.name,
-      subtitle: `${bizMatch.category} • Registered Local Business (${bizMatch.location})`,
-      latitude: 13.1390,
-      longitude: 123.7336,
-    };
-  }
-  const match = routeDestinations.find((destination) => normalized.includes(destination.name.toLowerCase()) || destination.name.toLowerCase().includes(normalized));
-  if (match) return match;
-  if (normalized.includes("cagsawa") || normalized.includes("atv")) return catalog[0];
-  if (normalized.includes("nature trail")) return routeDestinations.find((place) => place.id === "mayon-trail")!;
-  if (normalized.includes("sumlang") || normalized.includes("lake")) return catalog[2];
-  if (normalized.includes("mayon skyline") || normalized.includes("highland")) return catalog[1];
-  if (normalized.includes("daraga") || normalized.includes("church")) return routeDestinations.find((place) => place.id === "daraga-church")!;
-  if (normalized.includes("food") || normalized.includes("tasting")) return routeDestinations.find((place) => place.id === "camalig-food")!;
-  if (normalized.includes("market") || normalized.includes("shopping")) return routeDestinations.find((place) => place.id === "legazpi-market")!;
-  if (normalized.includes("boulevard") || normalized.includes("sunset") || normalized.includes("romantic")) return routeDestinations.find((place) => place.id === "legazpi-boulevard")!;
-  return { id: `custom-${normalized.replace(/[^a-z0-9]+/g, "-")}`, name: title, subtitle: "Approximate central Albay location", latitude: 13.1390, longitude: 123.7336 };
-}
-
-function terminalForDestination(destination: { latitude: number; longitude: number }): MapTerminal {
-  if (destination.longitude > 123.77) return routeTerminals.bacacay;
-  if (destination.latitude > 13.25) return routeTerminals.tabaco;
-  if (destination.longitude < 123.69) return routeTerminals.camalig;
-  if (destination.longitude < 123.72) return routeTerminals.daraga;
-  return routeTerminals.legazpi;
-}
-
-function buildMapRoute(plan: TripPlan): MapRouteStop[] {
-  const stops = plan.itinerary?.flatMap((day) => day.stops.map((stop, stopIndex) => ({ day: day.day, stopIndex, stop }))) ?? [];
-  return stops.map(({ day, stopIndex, stop }, index) => {
-    const destination = resolveRouteDestination(stop.title);
-    const terminal = terminalForDestination(destination);
-    const distance = distanceKm(terminal, destination) * 1.25;
-    const minutes = Math.max(8, Math.round((distance / 24) * 60 + 6));
-    return {
-      ...destination,
-      id: `${plan.id}-${day}-${stopIndex}-${destination.id}`,
-      day,
-      order: index + 1,
-      time: stop.time,
-      travelMinutes: minutes,
-      travelDistanceKm: Math.round(distance * 10) / 10,
-      terminal,
-      directions: `Board at ${terminal.name}. Take a ${terminal.transport.toLowerCase()} toward ${destination.name}, then confirm the nearest drop-off with the driver.`,
-    };
-  });
-}
-
-const savedImages: Record<string, string> = {
-  cagsawa: explore1,
-  mayon: explore2,
-  sumlang: explore3,
-  cafe: explore4,
-  highlands: explore5,
-  market: explore6,
-};
 
 const tabIcons: Record<Tab, string> = {
   Home: "home",
@@ -307,12 +159,12 @@ function Field({ label, value, onChangeText, placeholder, error, keyboardType = 
   );
 }
 
-function AppModal({ visible, title, children, onClose }: { visible: boolean; title: string; children: ReactNode; onClose: () => void }) {
+function AppModal({ visible, title, children, onClose, footer }: { visible: boolean; title: string; children: ReactNode; onClose: () => void; footer?: ReactNode }) {
   if (!visible) return null;
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal-sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
+        <div className="modal-header modal-header-sticky">
           <h2 className="modal-title">{title}</h2>
           <button onClick={onClose} aria-label={`Close ${title}`}>
             <Icon name="cancel" size={28} color="var(--c-muted)" />
@@ -321,6 +173,7 @@ function AppModal({ visible, title, children, onClose }: { visible: boolean; tit
         <div className="modal-body">
           {children}
         </div>
+        {footer ? <div className="modal-footer">{footer}</div> : null}
       </div>
     </div>
   );
@@ -390,6 +243,7 @@ function BottomTabs({ active, onChange }: { active: Tab; onChange: (tab: Tab) =>
 // ── Tab Screens ──
 
 function Home({ setTab, openMap, openEmergency, showNotice }: { setTab: (tab: Tab) => void; openMap: () => void; openEmergency: () => void; showNotice: (notice: NonNullable<Notice>) => void }) {
+  const { isNight, toggle: toggleNight, override: nightOverride } = useNightMode();
   const db = useDatabase();
   const { profile, user } = useAuth();
   const [dashboard, setDashboard] = useState({ name: "", saved: 0, plans: 0 });
@@ -425,6 +279,21 @@ function Home({ setTab, openMap, openEmergency, showNotice }: { setTab: (tab: Ta
           <h1 className="hero-text">{dashboard.name ? `Hello, ${dashboard.name}.` : "Your Legazpi journey starts here."}</h1>
           <p className="page-subtitle">Plan confidently, explore locally, and keep essential travel tools close.</p>
         </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <AlbayNowTicker onOpenEvents={() => { haptic("selection"); setTab("Explore"); }} />
+        </div>
+        <button
+          onClick={() => { haptic("selection"); toggleNight(); }}
+          aria-label={isNight ? "Switch to day mode" : "Switch to night mode"}
+          title={nightOverride === "auto" ? (isNight ? "Night mode (auto sunset) — tap to switch to day" : "Day mode (auto) — tap for night") : nightOverride === "on" ? "Night mode (manual) — tap for day" : "Day mode (manual) — tap for night"}
+          className="night-toggle"
+          style={{ flexShrink: 0 }}
+        >
+          <span className="material-symbols-outlined" style={{ fontSize: 18 }}>{isNight ? "light_mode" : "dark_mode"}</span>
+        </button>
       </div>
 
       <Card className="dashboard-card">
@@ -510,1000 +379,6 @@ function Home({ setTab, openMap, openEmergency, showNotice }: { setTab: (tab: Ta
     </div>
   );
 }
-
-function MapScreen({ initialPlanId, onClose }: { initialPlanId?: string | null; onClose: () => void }) {
-  const db = useDatabase();
-  const { user } = useAuth();
-  const [selectedId, setSelectedId] = useState("");
-  const [plans, setPlans] = useState<TripPlan[]>([]);
-  const [selectedPlanId, setSelectedPlanId] = useState(initialPlanId ?? "");
-  const [loadingPlans, setLoadingPlans] = useState(true);
-  const [routeError, setRouteError] = useState<string | null>(null);
-  const [showRoute, setShowRoute] = useState(false);
-  const [activeDay, setActiveDay] = useState(1);
-  const [completedStops, setCompletedStops] = useState<Set<string>>(() => new Set());
-  const [completedDayPrompt, setCompletedDayPrompt] = useState<number | null>(null);
-  const [liveTracking, setLiveTracking] = useState(false);
-  const [liveLocation, setLiveLocation] = useState<(MapPlace & { accuracy: number; heading?: number | null; speed?: number | null }) | null>(null);
-  const [locationError, setLocationError] = useState<string | null>(null);
-  const [startPointId, setStartPointId] = useState("current-location");
-  const [destinationId, setDestinationId] = useState("");
-  const [droppedPin, setDroppedPin] = useState<MapPlace | null>(null);
-  const [routeGeometry, setRouteGeometry] = useState<[number, number][]>([]);
-  const [autoRoute, setAutoRoute] = useState<{ distanceKm: number; durationMinutes: number } | null>(null);
-  const [autoRouteLoading, setAutoRouteLoading] = useState(false);
-  const [autoRouteError, setAutoRouteError] = useState<string | null>(null);
-
-  // Waze auto-navigation, transport routes, and place replacement state
-  const [isNavigating, setIsNavigating] = useState(false);
-  const [currentNavStopIndex, setCurrentNavStopIndex] = useState(0);
-  const [navToast, setNavToast] = useState<string | null>(null);
-  const [replaceTarget, setReplaceTarget] = useState<{ day: number; stopIndex: number; currentTitle: string } | null>(null);
-  const [registeredBusinesses, setRegisteredBusinesses] = useState<RegisteredSmallBusiness[]>(() => readVerifiedSmallBusinesses());
-  const [showTransportRoutes, setShowTransportRoutes] = useState(true);
-  const [showRegisteredBusinesses, setShowRegisteredBusinesses] = useState(true);
-
-  // ── Waze enhancements ──
-  const [mapStyle, setMapStyle] = useState<"standard" | "dark" | "satellite">("standard");
-  const [followMode, setFollowMode] = useState(true);
-  const [heading, setHeading] = useState<number | null>(null);
-  const [speedKmh, setSpeedKmh] = useState<number | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<MapPlace[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [routeSteps, setRouteSteps] = useState<RouteStep[]>([]);
-  const [stepsOpen, setStepsOpen] = useState(true);
-  const [reportToastWaze, setReportToastWaze] = useState<string | null>(null);
-
-  useEffect(() => {
-    const refreshBusinesses = () => setRegisteredBusinesses(readVerifiedSmallBusinesses());
-    window.addEventListener(BUSINESS_CONTENT_CHANGED_EVENT, refreshBusinesses);
-    window.addEventListener("storage", refreshBusinesses);
-    return () => {
-      window.removeEventListener(BUSINESS_CONTENT_CHANGED_EVENT, refreshBusinesses);
-      window.removeEventListener("storage", refreshBusinesses);
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function loadPlans() {
-      if (!user) return;
-      try {
-        const loaded = await getTripPlans(db, user.uid);
-        if (cancelled) return;
-        const routable = loaded.filter((plan) => (plan.itinerary?.length ?? 0) > 0);
-        setPlans(routable);
-        setSelectedPlanId((current) => routable.some((plan) => plan.id === current) ? current : routable[0]?.id ?? "");
-      } catch {
-        if (!cancelled) setRouteError("Saved itineraries could not be loaded for routing.");
-      } finally {
-        if (!cancelled) setLoadingPlans(false);
-      }
-    }
-    void loadPlans();
-    return () => { cancelled = true; };
-  }, [db, user]);
-
-  const selectedPlan = plans.find((plan) => plan.id === selectedPlanId);
-  const routeStops = useMemo(() => selectedPlan ? buildMapRoute(selectedPlan) : [], [selectedPlan]);
-  const routeDays = useMemo(() => Array.from(new Set(routeStops.map((stop) => stop.day))), [routeStops]);
-  const visibleRouteStops = useMemo(() => routeStops.filter((stop) => stop.day === activeDay), [activeDay, routeStops]);
-  const activeNavStop = isNavigating ? (visibleRouteStops[currentNavStopIndex] ?? visibleRouteStops[0]) : null;
-  const selectedStop = visibleRouteStops.find((stop) => stop.id === selectedId);
-  const selectedPlace = catalog.find((place) => place.id === selectedId);
-  const totalMinutes = visibleRouteStops.reduce((total, stop) => total + stop.travelMinutes, 0);
-  const progressStorageKey = user && selectedPlanId ? `hilinga-route-progress:${user.uid}:${selectedPlanId}` : "";
-  const startPoint = startPointId === "current-location" ? liveLocation : routeDestinations.find((place) => place.id === startPointId) ?? null;
-  const destination = isNavigating && activeNavStop
-    ? activeNavStop
-    : (droppedPin ?? routeDestinations.find((place) => place.id === destinationId) ?? null);
-  const pointToPointActive = Boolean(destination && startPoint);
-  const mapDestination = droppedPin ?? (startPoint ? destination : null);
-  const pointToPointDistance = autoRoute?.distanceKm ?? (startPoint && destination ? Math.round(distanceKm(startPoint, destination) * 10) / 10 : null);
-  const pointToPointMinutes = autoRoute?.durationMinutes ?? (pointToPointDistance === null ? null : Math.max(3, Math.round(pointToPointDistance / 28 * 60)));
-
-  // ── Waze: Nominatim search ──
-  const doWazeSearch = useCallback(async (q?: string) => {
-    const query = (q ?? searchQuery).trim();
-    if (!query) { setSearchResults([]); setSearchError(null); return; }
-    setSearchLoading(true);
-    setSearchError(null);
-    try {
-      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=8&q=${encodeURIComponent(query)}&countrycodes=ph&addressdetails=1`;
-      const res = await fetch(url, { headers: { Accept: "application/json" } });
-      if (!res.ok) throw new Error(`Search failed (${res.status})`);
-      const data = (await res.json()) as Array<{ display_name: string; lat: string; lon: string }>;
-      const places: MapPlace[] = data.map((r, i) => ({
-        id: `waze-search-${i}-${r.lat}-${r.lon}`.replace(/[^a-z0-9-]/gi, "-"),
-        name: (r.display_name.split(",")[0] || r.display_name).slice(0, 64).trim() || r.display_name.slice(0, 64),
-        subtitle: r.display_name,
-        latitude: Number(r.lat),
-        longitude: Number(r.lon),
-      }));
-      setSearchResults(places);
-      if (places.length === 0) setSearchError("No places found — try a different name or tap the map to drop a pin.");
-    } catch (err) {
-      setSearchError(err instanceof Error ? err.message : "Search failed.");
-      setSearchResults([]);
-    } finally {
-      setSearchLoading(false);
-    }
-  }, [searchQuery]);
-
-  useEffect(() => {
-    if (!startPoint || !destination) {
-      setRouteGeometry([]);
-      setAutoRoute(null);
-      setRouteSteps([]);
-      setAutoRouteLoading(false);
-      return;
-    }
-    const controller = new AbortController();
-    const url = `https://router.project-osrm.org/route/v1/driving/${startPoint.longitude},${startPoint.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson&steps=true`;
-    setAutoRouteLoading(true);
-    setAutoRouteError(null);
-    fetch(url, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Routing request failed with HTTP ${response.status}`);
-        return response.json() as unknown as Promise<any>;
-      })
-      .then((payload) => {
-        const route = payload.routes?.[0];
-        if (payload.code !== "Ok" || !route) throw new Error("No road route was returned");
-        setRouteGeometry((route.geometry.coordinates as [number, number][]).map(([longitude, latitude]: [number, number]) => [latitude, longitude] as [number, number]));
-        setAutoRoute({ distanceKm: Math.round(route.distance / 100) / 10, durationMinutes: Math.max(1, Math.round(route.duration / 60)) });
-        const steps: RouteStep[] = ((route.legs ?? []) as Array<{ steps: Array<{ distance: number; duration: number; name: string; maneuver: { type: string; modifier?: string; instruction?: string } }> }>).flatMap((leg) =>
-          (leg.steps ?? []).map((s: { distance: number; duration: number; name: string; maneuver: { type: string; modifier?: string; instruction?: string } }) => ({
-            instruction: s.maneuver.instruction || (s.name ? `${s.maneuver.type === "depart" ? "Head" : s.maneuver.modifier ? `Turn ${s.maneuver.modifier}` : s.maneuver.type} ${s.name ? `onto ${s.name}` : ""}`.trim() : s.maneuver.type),
-            distance: s.distance,
-            duration: s.duration,
-            maneuver: `${s.maneuver.type}${s.maneuver.modifier ? ` ${s.maneuver.modifier}` : ""}`,
-          }))
-        );
-        setRouteSteps(steps);
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        setRouteGeometry([]);
-        setAutoRoute(null);
-        setRouteSteps([]);
-        setAutoRouteError("Road routing is temporarily unavailable, so the map is showing a direct estimate.");
-      })
-      .finally(() => { if (!controller.signal.aborted) setAutoRouteLoading(false); });
-    return () => controller.abort();
-  }, [destination, startPoint]);
-
-  useEffect(() => {
-    if (!liveTracking) return;
-    if (!("geolocation" in navigator)) {
-      setLocationError("Live location is not supported by this browser.");
-      setLiveTracking(false);
-      return;
-    }
-    setLocationError(null);
-    const watchId = navigator.geolocation.watchPosition(
-      ({ coords }) => {
-        const h = coords.heading != null && Number.isFinite(coords.heading) ? coords.heading : null;
-        const sp = coords.speed != null && Number.isFinite(coords.speed) ? Math.round(coords.speed * 3.6) : null;
-        setLiveLocation({
-          id: "current-location",
-          name: "Your live location",
-          subtitle: "Updates as you move",
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          accuracy: coords.accuracy,
-          heading: h,
-          speed: coords.speed,
-        });
-        if (h != null) setHeading(h);
-        setSpeedKmh(sp);
-        setLocationError(null);
-      },
-      (error) => {
-        const message = error.code === error.PERMISSION_DENIED
-          ? "Location access was denied. Allow location permission in your browser to use live routing."
-          : "Your live location could not be found. Check your device location settings and try again.";
-        setLocationError(message);
-        setLiveTracking(false);
-      },
-      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 },
-    );
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [liveTracking]);
-
-  useEffect(() => {
-    setSelectedId(showRoute ? visibleRouteStops[0]?.id ?? "" : "");
-  }, [showRoute, visibleRouteStops]);
-
-  useEffect(() => {
-    setActiveDay(routeDays[0] ?? 1);
-    setCompletedDayPrompt(null);
-    setShowRoute(Boolean(selectedPlanId));
-    setCurrentNavStopIndex(0);
-    setIsNavigating(false);
-  }, [selectedPlanId, routeDays]);
-
-  function markStopDone(stop: MapRouteStop) {
-    const next = new Set(completedStops);
-    if (next.has(stop.id)) next.delete(stop.id);
-    else next.add(stop.id);
-    setCompletedStops(next);
-    if (progressStorageKey) localStorage.setItem(progressStorageKey, JSON.stringify([...next]));
-    const dayStops = routeStops.filter((item) => item.day === stop.day);
-    if (next.has(stop.id) && dayStops.every((item) => next.has(item.id))) setCompletedDayPrompt(stop.day);
-    else if (completedDayPrompt === stop.day) setCompletedDayPrompt(null);
-  }
-
-  function proceedToNextDay() {
-    const currentIndex = routeDays.indexOf(activeDay);
-    const nextDay = routeDays[currentIndex + 1];
-    if (nextDay !== undefined) {
-      setActiveDay(nextDay);
-      setShowRoute(true);
-      setCurrentNavStopIndex(0);
-    }
-    setCompletedDayPrompt(null);
-  }
-
-  function toggleLiveLocation() {
-    setStartPointId("current-location");
-    setLiveTracking((current) => {
-      if (current) { setLiveLocation(null); setHeading(null); setSpeedKmh(null); }
-      return !current;
-    });
-  }
-
-  function swapRoutePoints() {
-    if (startPointId === "current-location") return;
-    setStartPointId(destinationId);
-    setDestinationId(startPointId);
-  }
-
-  const hasLiveLocation = liveLocation !== null;
-  const chooseDestination = useCallback((place: MapPlace) => {
-    setDroppedPin(place);
-    setDestinationId(place.id);
-    setSelectedId("");
-    setShowRoute(false);
-    if (startPointId === "current-location" && !hasLiveLocation) setLiveTracking(true);
-  }, [hasLiveLocation, startPointId]);
-
-  function openDirections() {
-    if (!destination) return;
-    const origin = startPoint ? `${startPoint.latitude},${startPoint.longitude}` : "Current Location";
-    const target = `${destination.latitude},${destination.longitude}`;
-    window.open(`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(target)}&travelmode=driving`, "_blank", "noopener,noreferrer");
-  }
-
-  function startNavigationMode() {
-    if (!visibleRouteStops.length) return;
-    setIsNavigating(true);
-    setShowRoute(true);
-    setStartPointId("current-location");
-    if (!hasLiveLocation) setLiveTracking(true);
-    setCurrentNavStopIndex(0);
-    setSelectedId(visibleRouteStops[0].id);
-    setFollowMode(true);
-    setNavToast(`Started Waze navigation to Stop 1: ${visibleRouteStops[0].name}`);
-    setTimeout(() => setNavToast(null), 4000);
-  }
-
-  function advanceNavToNextStop() {
-    if (!activeNavStop) return;
-    markStopDone(activeNavStop);
-    if (currentNavStopIndex + 1 < visibleRouteStops.length) {
-      const nextIndex = currentNavStopIndex + 1;
-      setCurrentNavStopIndex(nextIndex);
-      const nextStop = visibleRouteStops[nextIndex];
-      setSelectedId(nextStop.id);
-      setNavToast(`Reached Stop ${currentNavStopIndex + 1}! Auto-routing to Stop ${nextIndex + 1}: ${nextStop.name}...`);
-    } else {
-      const currentIndex = routeDays.indexOf(activeDay);
-      const nextDay = routeDays[currentIndex + 1];
-      if (nextDay !== undefined) {
-        setActiveDay(nextDay);
-        setCurrentNavStopIndex(0);
-        setNavToast(`Day ${activeDay} completed! Auto-routing to Day ${nextDay} stops...`);
-      } else {
-        setNavToast("🎉 Congratulations! You completed all stops in this itinerary.");
-        setIsNavigating(false);
-      }
-    }
-    setTimeout(() => setNavToast(null), 4000);
-  }
-
-  async function handleSelectReplacement(newTitle: string) {
-    if (!replaceTarget || !selectedPlan) return;
-    const { day, stopIndex } = replaceTarget;
-    const updatedItinerary = (selectedPlan.itinerary ?? []).map((dayPlan) => {
-      if (dayPlan.day !== day) return dayPlan;
-      const newStops = [...dayPlan.stops];
-      if (newStops[stopIndex]) {
-        newStops[stopIndex] = {
-          ...newStops[stopIndex],
-          title: newTitle,
-          note: `Customized stop: ${newTitle}.`,
-        };
-      }
-      return { ...dayPlan, stops: newStops };
-    });
-
-    try {
-      if (user) {
-        await updateTripPlan(db, user.uid, selectedPlan.id, { itinerary: updatedItinerary });
-        const loaded = await getTripPlans(db, user.uid);
-        setPlans(loaded);
-      }
-      setNavToast(`Replaced stop with "${newTitle}". Route updated!`);
-      setTimeout(() => setNavToast(null), 4000);
-    } catch {
-      setRouteError("Could not save updated place into itinerary.");
-    }
-  }
-
-  const etaLabel = pointToPointMinutes != null ? new Date(Date.now() + pointToPointMinutes * 60000).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" }) : null;
-
-  return (
-    <div className="map-screen">
-      <div className="map-header">
-        <button className="icon-btn" onClick={onClose} aria-label="Close map">
-          <Icon name="arrow_back" size={23} color="var(--c-green)" />
-        </button>
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
-          <h1 className="page-title">{isNavigating ? "Waze Navigation" : "Map — Waze style"}</h1>
-          <span style={{ color: "var(--c-body)", fontSize: 13 }}>
-            {isNavigating
-              ? `Driving to ${activeNavStop?.name ?? "destination"} • ${pointToPointMinutes ?? activeNavStop?.travelMinutes ?? "—"} min`
-              : pointToPointActive
-                ? `Routing to ${destination?.name} • ${pointToPointDistance ?? "—"} km`
-                : selectedStop?.name ?? selectedPlace?.name ?? "Search, drop a pin, or route an itinerary."}
-          </span>
-        </div>
-      </div>
-
-      {navToast && (
-        <div className="nav-toast" role="status">
-          <Icon name="navigation" size={18} color="white" />
-          <span>{navToast}</span>
-        </div>
-      )}
-      {reportToastWaze && (
-        <div className="nav-toast" role="status" style={{ background: "#92400E" }}>
-          <Icon name="check_circle" size={18} color="white" />
-          <span>{reportToastWaze}</span>
-        </div>
-      )}
-
-      {isNavigating && activeNavStop && (
-        <Card className="nav-hud-top">
-          <div className="nav-hud-header">
-            <span className="nav-hud-badge">WAZE DRIVE</span>
-            <span className="nav-hud-stop-badge">Stop {currentNavStopIndex + 1} of {visibleRouteStops.length} (Day {activeDay})</span>
-            <button className="nav-hud-exit-btn" onClick={() => setIsNavigating(false)}>Exit Waze</button>
-          </div>
-          <div className="nav-hud-main">
-            <div className="nav-hud-icon-box">
-              <Icon name="navigation" size={24} color="white" />
-            </div>
-            <div className="nav-hud-copy">
-              <strong>{activeNavStop.name}</strong>
-              <span>{activeNavStop.directions}</span>
-            </div>
-          </div>
-          <div className="nav-hud-metrics">
-            <span><Icon name="schedule" size={16} />{pointToPointMinutes ?? activeNavStop.travelMinutes} min • ETA {etaLabel ?? "—"}</span>
-            <span><Icon name="straighten" size={16} />{pointToPointDistance ?? activeNavStop.travelDistanceKm} km</span>
-            <span><Icon name="directions_car" size={16} />{activeNavStop.terminal.transport}</span>
-          </div>
-          <button className="nav-hud-next-btn" onClick={advanceNavToNextStop}>
-            <Icon name="check_circle" size={20} color="white" /> Mark Reached & Navigate Next
-          </button>
-        </Card>
-      )}
-
-      {/* ── Waze search bar ── */}
-      {!isNavigating && (
-        <div className="waze-search-bar">
-          <div className="waze-search-row">
-            <label className="waze-search-input-wrap">
-              <Icon name="search" size={18} color="var(--c-muted)" />
-              <input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") void doWazeSearch(); }}
-                placeholder="Where to? Search Albay — e.g. Cagsawa, Legazpi Boulevard, Daraga Church"
-                aria-label="Search map"
-              />
-              {searchQuery && (
-                <button onClick={() => { setSearchQuery(""); setSearchResults([]); setSearchError(null); }} aria-label="Clear search">
-                  <Icon name="cancel" size={18} color="var(--c-muted)" />
-                </button>
-              )}
-            </label>
-            <button className="waze-search-go" onClick={() => void doWazeSearch()} disabled={searchLoading || !searchQuery.trim()}>
-              {searchLoading ? <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2, borderTopColor: "white" }} /> : <><Icon name="search" size={16} color="white" /> Go</>}
-            </button>
-          </div>
-          <div className="waze-quick-pills" role="list">
-            {["Cagsawa Ruins", "Legazpi Boulevard", "Daraga Church", "Sumlang Lake", "Tabaco Port"].map((q) => (
-              <button key={q} type="button" className={`waze-quick-pill ${searchQuery === q ? "waze-quick-pill-active" : ""}`} onClick={() => { setSearchQuery(q); void doWazeSearch(q); }}>
-                <Icon name="location_on" size={14} color={searchQuery === q ? "white" : "var(--c-green)"} /> {q}
-              </button>
-            ))}
-            <button type="button" className="waze-quick-pill" onClick={() => { setSearchQuery(""); setSearchResults([]); setDroppedPin(null); setDestinationId(""); }}>
-              <Icon name="close" size={14} /> Clear destination
-            </button>
-          </div>
-          {(searchResults.length > 0 || searchLoading || searchError) && (
-            <div>
-              {searchError && <p className="live-location-error" role="alert" style={{ marginTop: 4 }}><Icon name="warning" size={14} />{searchError}</p>}
-              {searchLoading && <div className="smart-map-loading" style={{ minHeight: 54 }}><div className="spinner" /><span>Searching Albay…</span></div>}
-              {searchResults.length > 0 && (
-                <div className="waze-search-results" role="listbox" aria-label="Search results">
-                  {searchResults.map((r) => (
-                    <button key={r.id} type="button" className="waze-search-result" onClick={() => { chooseDestination(r); setSearchResults([]); setSearchQuery(r.name); }} role="option" aria-label={`Navigate to ${r.name}`}>
-                      <span style={{ width: 36, height: 36, borderRadius: 999, background: "var(--c-pale)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name="place" size={18} color="var(--c-green)" /></span>
-                      <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2, textAlign: "left" }}><strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</strong><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10 }}>{r.subtitle}</span></span>
-                      <Icon name="north_east" size={16} color="var(--c-muted)" />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {!isNavigating && (
-        <Card className="live-route-controls">
-          <div className="live-route-heading">
-            <div><span>WAZE LIVE</span><strong>Start and destination</strong></div>
-            <button className={`live-location-switch ${liveTracking ? "live-location-switch-active" : ""}`} role="switch" aria-checked={liveTracking} onClick={toggleLiveLocation}>
-              <span className="live-location-switch-track"><i /></span>
-              <Icon name="my_location" size={17} />{liveTracking ? "Live on" : "Use live location"}
-            </button>
-          </div>
-          <div className="route-point-fields">
-            <label><span><i className="route-point-dot route-point-start" />Starting point</span><select value={startPointId} onChange={(event) => { setStartPointId(event.target.value); if (event.target.value !== "current-location") { setLiveTracking(false); setLiveLocation(null); setHeading(null); setSpeedKmh(null); } }}><option value="current-location">My current location</option>{routeDestinations.map((place) => <option key={`start-${place.id}`} value={place.id}>{place.name}</option>)}</select></label>
-            <button className="route-swap-button" onClick={swapRoutePoints} disabled={startPointId === "current-location"} aria-label="Swap starting point and destination"><Icon name="swap_vert" size={20} /></button>
-            <label><span><i className="route-point-dot route-point-destination" />Destination</span><select value={destinationId} onChange={(event) => { setDroppedPin(null); setDestinationId(event.target.value); }}><option value="">— Pick or search above —</option>{droppedPin && <option value={droppedPin.id}>📍 Dropped pin ({droppedPin.subtitle.slice(0, 32)})</option>}{routeDestinations.map((place) => <option key={`destination-${place.id}`} value={place.id}>{place.name}</option>)}</select></label>
-          </div>
-          {startPointId === "current-location" && !liveLocation && <p className="live-location-hint"><Icon name={liveTracking ? "location_searching" : "info"} size={16} />{liveTracking ? "Finding your live location… allow permission and keep screen on." : "Turn on live location to use your position as the start — like Waze."}</p>}
-          {locationError && <p className="live-location-error" role="alert"><Icon name="location_off" size={17} />{locationError}</p>}
-          {pointToPointActive && <div className="live-route-summary"><span><Icon name="route" size={16} />{pointToPointDistance} km {autoRoute ? "by road" : "estimated"}</span><span><Icon name="schedule" size={16} />{autoRouteLoading ? "Routing…" : `About ${pointToPointMinutes} min • ETA ${etaLabel ?? "—"}`}</span><button onClick={openDirections}><Icon name="navigation" size={17} />Directions</button></div>}
-          {autoRouteError && <p className="live-location-error" role="status"><Icon name="warning" size={17} />{autoRouteError}</p>}
-        </Card>
-      )}
-
-      <Card className="smart-map-controls">
-        <label htmlFor="route-plan">Route a saved itinerary</label>
-        <div className="smart-map-select-row">
-          <Icon name="route" size={21} color="var(--c-green)" />
-          <select id="route-plan" value={selectedPlanId} disabled={loadingPlans || plans.length === 0} onChange={(event) => setSelectedPlanId(event.target.value)}>
-            {plans.length === 0 ? <option value="">No saved itinerary available</option> : plans.map((plan) => <option key={plan.id} value={plan.id}>{plan.title}</option>)}
-          </select>
-        </div>
-        {selectedPlan && (
-          <div className="smart-map-summary">
-            <span><Icon name="location_on" size={16} />{routeStops.length} stops</span>
-            <span><Icon name="schedule" size={16} />About {totalMinutes} min travel</span>
-            <span className="plan-budget-chip" style={{ border: 0, padding: "3px 9px", margin: 0 }}>
-              <Icon name="payments" size={15} color="var(--c-green)" />
-              {selectedPlan.preferences.budget !== null ? `₱${selectedPlan.preferences.budget.toLocaleString()}` : "Moderate"}
-            </span>
-          </div>
-        )}
-        {selectedPlan && (
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className={`smart-map-route-toggle ${showRoute ? "smart-map-route-toggle-active" : ""}`} style={{ flex: 1 }} onClick={() => setShowRoute((current) => !current)}>
-              <Icon name={showRoute ? "visibility_off" : "route"} size={19} />{showRoute ? "Hide route" : "Show route"}
-            </button>
-            <button className="smart-map-route-toggle" style={{ flex: 1, background: "var(--c-green)", color: "white", borderColor: "var(--c-green)" }} onClick={startNavigationMode}>
-              <Icon name="navigation" size={19} color="white" />Start Waze
-            </button>
-          </div>
-        )}
-      </Card>
-
-      {routeError && <p className="error-text" role="alert">{routeError}</p>}
-
-      {routeDays.length > 1 && (
-        <div className="smart-map-days" aria-label="Itinerary days">
-          {routeDays.map((day) => {
-            const dayStops = routeStops.filter((stop) => stop.day === day);
-            const dayDone = dayStops.length > 0 && dayStops.every((stop) => completedStops.has(stop.id));
-            return <button key={day} className={activeDay === day ? "smart-map-day-active" : ""} onClick={() => { setActiveDay(day); setShowRoute(true); }}><Icon name={dayDone ? "check_circle" : "calendar_today"} size={16} />Day {day}</button>;
-          })}
-        </div>
-      )}
-
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "4px 0 8px 0" }}>
-        <button
-          type="button"
-          style={{ padding: "6px 12px", borderRadius: 999, fontSize: 12, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, background: showTransportRoutes ? "#FEF3C7" : "var(--c-chip)", color: showTransportRoutes ? "#92400E" : "var(--c-body)", border: "1px solid", borderColor: showTransportRoutes ? "#FCD34D" : "transparent" }}
-          onClick={() => setShowTransportRoutes((curr) => !curr)}
-        >
-          <Icon name="directions_bus" size={15} color={showTransportRoutes ? "#D97706" : "var(--c-muted)"} />
-          Transport Hubs & Routes
-        </button>
-        <button
-          type="button"
-          style={{ padding: "6px 12px", borderRadius: 999, fontSize: 12, fontWeight: 800, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, background: showRegisteredBusinesses ? "#E8F5EE" : "var(--c-chip)", color: showRegisteredBusinesses ? "var(--c-green-dark)" : "var(--c-body)", border: "1px solid", borderColor: showRegisteredBusinesses ? "#C3E6D2" : "transparent" }}
-          onClick={() => setShowRegisteredBusinesses((curr) => !curr)}
-        >
-          <Icon name="storefront" size={15} color={showRegisteredBusinesses ? "var(--c-green)" : "var(--c-muted)"} />
-          Registered Businesses ({registeredBusinesses.length})
-        </button>
-      </div>
-
-      {/* ── Waze map wrap with FABs & overlays ── */}
-      <div className="waze-map-wrap">
-        <OpenStreetMap
-          places={showRoute && visibleRouteStops.length > 0 ? visibleRouteStops : catalog}
-          routeStops={showRoute ? visibleRouteStops : []}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          liveLocation={liveLocation}
-          startPoint={isNavigating || pointToPointActive ? startPoint : null}
-          destination={isNavigating || pointToPointActive ? mapDestination : null}
-          routeGeometry={routeGeometry}
-          routeSteps={routeSteps}
-          onMapPress={chooseDestination}
-          registeredBusinesses={registeredBusinesses}
-          showTransportRoutes={showTransportRoutes}
-          showRegisteredBusinesses={showRegisteredBusinesses}
-          followMode={followMode && (liveTracking || isNavigating)}
-          bearing={heading}
-          mapStyle={mapStyle}
-        />
-        {liveLocation && speedKmh != null && (
-          <div className="waze-speed-badge" aria-live="polite">
-            <Icon name="speed" size={18} color="white" />
-            <div style={{ display: "flex", flexDirection: "column", gap: 0, lineHeight: 1 }}>
-              <strong>{speedKmh} <span style={{ fontSize: 11, fontWeight: 800 }}>km/h</span></strong>
-              <span>Live speed</span>
-            </div>
-            {heading != null && <span style={{ marginLeft: 6, background: "rgba(255,255,255,0.16)", padding: "4px 7px", borderRadius: 999, fontSize: 10, fontWeight: 900 }}>{Math.round(heading)}°</span>}
-          </div>
-        )}
-        <div className="waze-style-chips">
-          {(["standard", "dark", "satellite"] as const).map((s) => (
-            <button key={s} type="button" className={`waze-style-chip ${mapStyle === s ? "waze-style-chip-active" : ""}`} onClick={() => setMapStyle(s)}>
-              <Icon name={s === "satellite" ? "satellite_alt" : s === "dark" ? "dark_mode" : "map"} size={14} color={mapStyle === s ? "white" : "var(--c-ink)"} />
-              {s === "standard" ? "Map" : s === "dark" ? "Dark" : "Satellite"}
-            </button>
-          ))}
-        </div>
-        <div className="waze-fabs">
-          <button type="button" className={`waze-fab ${followMode ? "waze-fab-follow-active" : ""}`} onClick={() => setFollowMode((v) => !v)} aria-label={followMode ? "Following — tap to free map" : "Re-center on me"} title={followMode ? "Following your location" : "Tap to follow your location"}>
-            <Icon name={followMode ? "my_location" : "location_searching"} size={20} color={followMode ? "white" : "var(--c-green)"} />
-          </button>
-          <button type="button" className="waze-fab" onClick={() => { setFollowMode(true); if (liveLocation) setSelectedId(""); }} aria-label="Recenter map">
-            <Icon name="center_focus_strong" size={20} color="var(--c-ink)" />
-          </button>
-          <button type="button" className="waze-fab" onClick={() => setMapStyle((prev) => prev === "standard" ? "satellite" : prev === "satellite" ? "dark" : "standard")} aria-label="Switch map style">
-            <Icon name="layers" size={20} color="var(--c-ink)" />
-          </button>
-        </div>
-      </div>
-
-      {/* ── Waze ETA strip ── */}
-      {(pointToPointActive || isNavigating) && pointToPointDistance != null && pointToPointMinutes != null && (
-        <div className="waze-eta-strip" role="status" aria-live="polite">
-          <span style={{ width: 40, height: 40, borderRadius: 12, background: "#00A86B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name="navigation" size={20} color="white" /></span>
-          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-            <strong style={{ fontSize: 13 }}>{pointToPointDistance} km • {pointToPointMinutes} min • ETA {etaLabel}</strong>
-            <span style={{ fontSize: 11, opacity: 0.88 }}>{autoRoute ? "Road-following via OSRM" : "Straight-line estimate"} • {heading != null ? `Heading ${Math.round(heading)}°` : "Waze-style live"}</span>
-          </div>
-          <button onClick={openDirections} style={{ minHeight: 36, padding: "0 14px", borderRadius: 10, background: "white", color: "#12291E", fontWeight: 900, fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}><Icon name="directions" size={16} /> Go</button>
-        </div>
-      )}
-
-      {/* ── Waze steps sheet (turn-by-turn) ── */}
-      {routeSteps.length > 0 && (
-        <div className="waze-steps-sheet">
-          <button type="button" className="waze-steps-toggle" onClick={() => setStepsOpen((v) => !v)}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="route" size={16} color="var(--c-green)" /> {routeSteps.length} turns • {autoRoute?.distanceKm ?? pointToPointDistance ?? "—"} km</span>
-            <Icon name={stepsOpen ? "expand_less" : "expand_more"} size={20} color="var(--c-muted)" />
-          </button>
-          {stepsOpen && (
-            <div>
-              {routeSteps.slice(0, 14).map((st, i) => (
-                <div key={i} className="waze-step">
-                  <span style={{ width: 30, height: 30, borderRadius: 999, background: i === 0 ? "#1A73E8" : "#F3F7F4", color: i === 0 ? "white" : "var(--c-ink)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <Icon name={st.maneuver.includes("left") ? "turn_left" : st.maneuver.includes("right") ? "turn_right" : st.maneuver.includes("roundabout") ? "roundabout_right" : st.maneuver.includes("arrive") ? "flag" : "straight"} size={16} color={i === 0 ? "white" : "var(--c-ink)"} />
-                  </span>
-                  <span style={{ minWidth: 0 }}><strong>{st.instruction || "Continue"}</strong><br /><small>{(st.distance / 1000).toFixed(1)} km • {Math.max(1, Math.round(st.duration / 60))} min</small></span>
-                  <Icon name="chevron_right" size={16} color="var(--c-muted)" />
-                </div>
-              ))}
-              {routeSteps.length > 14 && <div style={{ padding: "8px 14px", fontSize: 11, color: "var(--c-muted)", textAlign: "center", borderTop: "1px solid #EEF2EF" }}>+ {routeSteps.length - 14} more turns on this route</div>}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Waze report bar ── */}
-      <div className="waze-report-bar" aria-label="Report on road">
-        {[
-          ["Traffic jam", "traffic"],
-          ["Police", "local_police"],
-          ["Hazard", "warning"],
-          ["Road closed", "block"],
-          ["Gas", "local_gas_station"],
-        ].map(([label, icon]) => (
-          <button key={label} type="button" className="waze-report-btn" onClick={() => { setReportToastWaze(`${label} reported — thanks! (demo)`); setTimeout(() => setReportToastWaze(null), 2800); }}>
-            <Icon name={icon} size={14} /> {label}
-          </button>
-        ))}
-      </div>
-
-      {routeStops.length > 0 ? (
-        <section className="smart-route-panel" aria-label="Itinerary route and terminals">
-          <div className="smart-route-heading"><div><span className="eyebrow">Route guide</span><h2>Where to ride</h2></div><span className="route-estimate-badge">Estimates</span></div>
-          <p className="smart-route-disclaimer">Travel times and town-center boarding points are planning estimates. Confirm the route and terminal locally; traffic, weather, queues, and drop-off points can change the trip.</p>
-          <div className="smart-route-list">
-            {visibleRouteStops.map((stop, stopIndex) => (
-              <article key={stop.id} className={`smart-route-leg ${selectedId === stop.id ? "smart-route-leg-selected" : ""} ${completedStops.has(stop.id) ? "smart-route-leg-done" : ""}`}>
-                <span className="smart-route-number">{stop.order}</span>
-                <button className="smart-route-copy" onClick={() => { setSelectedId(stop.id); setShowRoute(true); }}>
-                  <span className="smart-route-day">Day {stop.day}{stop.time ? ` · ${stop.time}` : ""}</span>
-                  <strong>{stop.name}</strong>
-                  <span><Icon name="directions_bus" size={16} />{stop.terminal.name} <Icon name="arrow_forward" size={14} /> {stop.name}</span>
-                  <small>{stop.directions}</small>
-                </button>
-                <span className="smart-route-actions">
-                  <span className="smart-route-time"><strong>{stop.travelMinutes} min</strong><small>{stop.travelDistanceKm} km</small></span>
-                  <button className="smart-route-done-btn" onClick={() => markStopDone(stop)}><Icon name={completedStops.has(stop.id) ? "check_circle" : "radio_button_unchecked"} size={17} />{completedStops.has(stop.id) ? "Done" : "Mark done"}</button>
-                  <button className="itinerary-replace-btn" style={{ marginTop: 4 }} onClick={() => setReplaceTarget({ day: stop.day, stopIndex, currentTitle: stop.name })}>
-                    <Icon name="swap_horiz" size={14} /> Replace
-                  </button>
-                </span>
-              </article>
-            ))}
-          </div>
-          {completedDayPrompt === activeDay && (
-            <Card className="smart-day-complete">
-              <Icon name="task_alt" size={29} color="var(--c-green)" filled />
-              <div><strong>Day {activeDay} is complete</strong><p>{routeDays.indexOf(activeDay) < routeDays.length - 1 ? "Would you like to proceed to the next day?" : "You’ve completed the full itinerary."}</p></div>
-              {routeDays.indexOf(activeDay) < routeDays.length - 1 ? <><Button label={`Proceed to Day ${routeDays[routeDays.indexOf(activeDay) + 1]}`} onPress={proceedToNextDay} /><Button label={`Stay on Day ${activeDay}`} onPress={() => setCompletedDayPrompt(null)} secondary /></> : <Button label="Keep viewing this plan" onPress={() => setCompletedDayPrompt(null)} secondary />}
-            </Card>
-          )}
-        </section>
-      ) : !loadingPlans ? (
-        <EmptyState icon="route" title="No itinerary route yet" message="Generate and save an itinerary first. Its destinations and boarding terminals will appear here automatically. Search above or tap the map to route anywhere like Waze." />
-      ) : (
-        <div className="smart-map-loading"><div className="spinner" /><span>Loading itinerary routes…</span></div>
-      )}
-
-      <ReplacePlaceModal
-        visible={replaceTarget !== null}
-        target={replaceTarget}
-        onClose={() => setReplaceTarget(null)}
-        onSelectReplacement={handleSelectReplacement}
-      />
-    </div>
-  );
-}
-
-
-function Explore({ initialFilter, initialBusinessId, onFilterHandled, onBusinessHandled }: { initialFilter: string | null; initialBusinessId: string | null; onFilterHandled: () => void; onBusinessHandled: () => void }) {
-  const db = useDatabase();
-  const { user, profile, avatarUrl } = useAuth();
-  const [filter, setFilter] = useState("All");
-  const [kind, setKind] = useState<ExploreKind>("All");
-  const [view, setView] = useState<ExploreView>("For you");
-  const [query, setQuery] = useState("");
-  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
-  const [pendingId, setPendingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<ExploreItem | null>(null);
-  const [collection, setCollection] = useState<{ title: string; eyebrow: string; itemIds: string[] } | null>(null);
-  const [reviews, setReviews] = useState<CommunityPost[]>([]);
-  const [reviewsLoading, setReviewsLoading] = useState(true);
-  const [reviewError, setReviewError] = useState<string | null>(null);
-  const [reviewText, setReviewText] = useState("");
-  const [reviewRating, setReviewRating] = useState<number | null>(null);
-  const [reviewPosting, setReviewPosting] = useState(false);
-  const [reviewDeleteTarget, setReviewDeleteTarget] = useState<CommunityPost | null>(null);
-  const [inquiryOpen, setInquiryOpen] = useState(false);
-  const [inquiryMessage, setInquiryMessage] = useState("");
-  const [inquirySending, setInquirySending] = useState(false);
-  const [inquiryError, setInquiryError] = useState<string | null>(null);
-  const [inquirySent, setInquirySent] = useState(false);
-
-  const [businessDirectory, setBusinessDirectory] = useState(() => readVerifiedRegisteredBusinesses());
-  useEffect(() => {
-    const refreshBusinesses = () => setBusinessDirectory([...readVerifiedRegisteredBusinesses()]);
-    // live Supabase subscription + cache — ensures other devices' verified businesses appear immediately
-    const unsubscribe = subscribeToRegisteredBusinesses(
-      () => refreshBusinesses(),
-      () => undefined,
-    );
-    window.addEventListener(BUSINESS_CONTENT_CHANGED_EVENT, refreshBusinesses);
-    // also listen for localStorage cross-tab updates
-    window.addEventListener("storage", refreshBusinesses);
-    return () => {
-      unsubscribe();
-      window.removeEventListener(BUSINESS_CONTENT_CHANGED_EVENT, refreshBusinesses);
-      window.removeEventListener("storage", refreshBusinesses);
-    };
-  }, []);
-  const registeredBusinesses = useMemo<ExploreItem[]>(() => businessDirectory.map((page) => ({
-    id: page.id,
-    name: page.name,
-    subtitle: page.about || `${page.category} registered on Hilinga`,
-    category: page.category || "Shopping",
-    kind: "Businesses",
-    savedKind: "Businesses",
-    visits: 0,
-    imageKey: "registered-business",
-    source: page.coverUrl || page.logoUrl || explore4,
-    logoSource: page.logoUrl,
-    latitude: page.latitude,
-    longitude: page.longitude,
-    location: page.location,
-    businessScale: page.businessScale,
-    registered: true,
-    ownerUid: page.ownerUid,
-  })), [businessDirectory]);
-  const allItems = useMemo(() => [...registeredBusinesses, ...catalog], [registeredBusinesses]);
-
-  useEffect(() => subscribeToCommunityPosts(
-    (nextReviews) => { setReviews(nextReviews); setReviewsLoading(false); setReviewError(null); },
-    () => { setReviewsLoading(false); setReviewError("Reviews could not be loaded. Check your connection and try again."); },
-  ), []);
-
-  const refresh = useCallback(async () => {
-    if (user) setSavedIds(await getSavedIds(db, user.uid));
-  }, [db, user]);
-  useEffect(() => { refresh().catch(() => setError("Saved items could not be loaded.")); }, [refresh]);
-  useEffect(() => { if (initialFilter) { setFilter(initialFilter); onFilterHandled(); } }, [initialFilter, onFilterHandled]);
-  useEffect(() => {
-    if (!initialBusinessId) return;
-    const business = allItems.find((item) => item.id === initialBusinessId && item.kind === "Businesses");
-    if (business) setSelected(business);
-    onBusinessHandled();
-  }, [allItems, initialBusinessId, onBusinessHandled]);
-  useEffect(() => {
-    setInquiryOpen(false);
-    setInquiryMessage("");
-    setInquiryError(null);
-    setInquirySent(false);
-  }, [selected?.id]);
-  useEffect(() => {
-    if (!user?.uid || !selected?.registered || !selected.ownerUid) return;
-    void recordBusinessProfileView({
-      businessId: selected.ownerUid,
-      businessName: selected.name,
-      viewerUid: user.uid,
-    }).catch(() => undefined);
-  }, [selected, user?.uid]);
-  const results = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    const matches = allItems.filter((item) =>
-      (kind === "All" || item.kind === kind)
-      && (filter === "All" || item.category === filter)
-      && `${item.name} ${item.subtitle} ${item.category} ${item.kind}`.toLowerCase().includes(normalizedQuery),
-    );
-    if (view === "Latest") return [...matches].sort((a, b) => Number(Boolean(b.registered)) - Number(Boolean(a.registered)));
-    if (view === "All") return [...matches].sort((a, b) => a.name.localeCompare(b.name));
-    return [...matches].sort((a, b) => b.visits - a.visits);
-  }, [allItems, filter, kind, query, view]);
-
-  async function toggleSaved(item: ExploreItem) {
-    if (pendingId) return;
-    setPendingId(item.id);
-    setError(null);
-    try {
-      if (!user) throw new Error("Your session has expired.");
-      if (savedIds.has(item.id)) await removeSavedItem(db, user.uid, item.id);
-      else await saveItem(db, user.uid, { id: item.id, title: item.name, subtitle: item.subtitle, kind: item.savedKind, imageKey: item.imageKey });
-      await refresh();
-    } catch { setError("That change could not be saved. Please try again."); } finally { setPendingId(null); }
-  }
-
-  function renderShelf(title: string, eyebrow: string, items: ExploreItem[]) {
-    if (items.length === 0) return null;
-    return (
-      <section className="explore-shelf" aria-label={title}>
-        <div className="explore-shelf-heading">
-          <div><span>{eyebrow}</span><h2>{title}</h2></div>
-          <button onClick={() => setCollection({ title, eyebrow, itemIds: items.map((item) => item.id) })}>See all <Icon name="arrow_forward" size={16} /></button>
-        </div>
-        <div className="explore-card-row">
-          {items.map((item) => (
-            <article className="explore-poster-card" key={item.id}>
-              <button className="explore-poster-main" onClick={() => setSelected(item)}>
-                <span className="explore-poster-image-wrap">
-                  <img src={item.source} alt={item.name} className="explore-poster-image" />
-                  <small>{item.registered ? "NEW ON HILINGA" : item.category.toUpperCase()}</small>
-                </span>
-                <span className="explore-poster-copy">
-                  <strong>{item.name}</strong>
-                  <span>{item.subtitle}</span>
-                  <em><Icon name={item.kind === "Businesses" ? "storefront" : item.kind === "Events" ? "event" : "location_on"} size={14} />{item.registered ? "Registered business" : item.detail || "Legazpi & nearby"}</em>
-                </span>
-              </button>
-              <button className={`explore-poster-save ${savedIds.has(item.id) ? "saved" : ""}`} aria-label={savedIds.has(item.id) ? `Remove ${item.name} from saved items` : `Save ${item.name}`} disabled={pendingId !== null} onClick={() => toggleSaved(item)}>
-                {pendingId === item.id ? <div className="spinner" /> : <Icon name="favorite" size={19} filled={savedIds.has(item.id)} />}
-              </button>
-            </article>
-          ))}
-        </div>
-      </section>
-    );
-  }
-
-  const collectionItems = collection ? collection.itemIds.map((id) => allItems.find((item) => item.id === id)).filter((item): item is ExploreItem => Boolean(item)) : [];
-
-  if (selected?.kind === "Businesses") {
-    const selectedBusiness = selected;
-    const isSaved = savedIds.has(selected.id);
-    const relatedBusinesses = allItems.filter((item) => item.kind === "Businesses" && item.id !== selected.id && (item.category === selected.category || item.businessScale === selected.businessScale)).slice(0, 4);
-    const businessPosts = readPublishedBusinessPosts().filter((post) => post.businessId === selected.id);
-    const gallery = businessPosts.map((post) => post.mediaUrl).filter(Boolean).concat([selected.source, ...catalog.filter((item) => item.source !== selected.source).map((item) => item.source)]).slice(0, 6);
-    const businessReviews = reviews.filter((review) => review.placeName.trim().toLowerCase() === selected.name.trim().toLowerCase());
-    const ratedReviews = businessReviews.filter((review) => review.rating !== null);
-    const averageRating = ratedReviews.length ? ratedReviews.reduce((sum, review) => sum + (review.rating ?? 0), 0) / ratedReviews.length : null;
-
-    async function publishReview() {
-      if (!user) { setReviewError("Your session has expired. Please sign in again."); return; }
-      if (reviewText.trim().length < 10 || reviewRating === null) { setReviewError("Add a star rating and at least 10 characters about your experience."); return; }
-      setReviewPosting(true); setReviewError(null);
-      try {
-        await createCommunityPost({ authorUid: user.uid, authorName: profile?.display_name.trim() || user.displayName || user.email?.split("@")[0] || "Hilinga traveler", authorAvatarUrl: avatarUrl, placeName: selectedBusiness.name, location: selectedBusiness.location || "Legazpi City, Albay", category: selectedBusiness.category === "Cafes" ? "Cafe" : selectedBusiness.category === "Stay" ? "Accommodation" : selectedBusiness.category === "Shopping" ? "Shop" : "Restaurant", experience: reviewText, rating: reviewRating, authorNationality: profile?.nationality ?? null, authorCountry: profile?.country ?? null, authorCountryIso2: profile?.country_iso2 ?? null });
-        setReviewText(""); setReviewRating(null);
-      } catch { setReviewError("Your review could not be posted. Please try again."); }
-      finally { setReviewPosting(false); }
-    }
-
-    async function removeReview() {
-      if (!reviewDeleteTarget) return;
-      setReviewPosting(true); setReviewError(null);
-      try { await deleteCommunityPost(reviewDeleteTarget.id); setReviewDeleteTarget(null); }
-      catch { setReviewError("That review could not be deleted."); }
-      finally { setReviewPosting(false); }
-    }
-
-    async function submitInquiry() {
-      if (!user || !selectedBusiness.ownerUid || inquirySending) return;
-      setInquirySending(true);
-      setInquiryError(null);
-      try {
-        await sendBusinessInquiry({
-          businessId: selectedBusiness.ownerUid,
-          businessName: selectedBusiness.name,
-          senderUid: user.uid,
-          senderName: profile?.display_name.trim() || user.displayName || user.email?.split("@")[0] || "Hilinga traveler",
-          senderEmail: user.email || "",
-          message: inquiryMessage,
-        });
-        setInquiryMessage("");
-        setInquirySent(true);
-      } catch (nextError) {
-        setInquiryError(nextError instanceof Error ? nextError.message : "Your message could not be sent. Please try again.");
-      } finally {
-        setInquirySending(false);
-      }
-    }
-    return (
-      <div className="screen explore-business-profile-screen">
-        <header className="business-public-nav">
-          <button onClick={() => setSelected(null)} aria-label="Back to Explore"><Icon name="arrow_back" size={23} /></button>
-          <strong>Business profile</strong>
-          <button className={isSaved ? "saved" : ""} onClick={() => void toggleSaved(selected)} aria-label={isSaved ? `Remove ${selected.name} from saved items` : `Save ${selected.name}`}>
-            {pendingId === selected.id ? <div className="spinner" /> : <Icon name="favorite" size={22} filled={isSaved} />}
-          </button>
-        </header>
-
-        <section className="business-public-hero">
-          <img className="business-public-cover" src={selected.source} alt={`${selected.name} cover`} />
-          <div className="business-public-identity">
-            <span className="business-public-logo">{selected.logoSource ? <img src={selected.logoSource} alt={`${selected.name} logo`} /> : <img src={selected.source} alt="" />}</span>
-            <div className="business-public-name"><div><h1>{selected.name}</h1>{selected.registered && <Icon name="verified" size={21} filled />}</div><p>{selected.category} · {selected.businessScale}</p></div>
-          </div>
-          <p className="business-public-bio">{selected.subtitle}</p>
-          <p className="business-public-location"><Icon name="location_on" size={18} />{selected.location || "Legazpi City, Albay"}</p>
-          <div className="business-public-actions">
-            <button className="primary" onClick={() => void toggleSaved(selected)} disabled={pendingId !== null}><Icon name={isSaved ? "favorite" : "favorite_border"} size={19} filled={isSaved} />{isSaved ? "Saved" : "Save"}</button>
-            <button onClick={() => selected.ownerUid ? setInquiryOpen(true) : window.location.assign(`mailto:?subject=${encodeURIComponent(`Inquiry for ${selected.name}`)}`)}><Icon name="chat_bubble" size={18} />Message</button>
-            <button onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${selected.latitude},${selected.longitude}`, "_blank", "noopener,noreferrer")}><Icon name="directions" size={19} />Directions</button>
-          </div>
-        </section>
-
-        <section className="business-public-stats" aria-label={`${selected.name} profile statistics`}>
-          <div><strong>{Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(selected.visits)}</strong><span>Profile visits</span></div>
-          <div><strong>{averageRating === null ? "New" : averageRating.toFixed(1)}</strong><span>{ratedReviews.length} {ratedReviews.length === 1 ? "rating" : "ratings"}</span></div>
-          <div><strong>{selected.registered ? "Official" : "Local"}</strong><span>Hilinga profile</span></div>
-        </section>
-
-        <section className="business-public-section">
-          <div className="business-public-section-title"><div><span>ABOUT</span><h2>Get to know {selected.name}</h2></div><Icon name="info" size={22} /></div>
-          <p>{selected.subtitle}. Discover what makes this {selected.category.toLowerCase()} destination a favorite among locals and visitors around Legazpi.</p>
-          <div className="business-public-detail-row"><span><Icon name="schedule" size={18} />Open today</span><strong>8:00 AM – 8:00 PM</strong></div>
-        </section>
-
-        <section className="business-public-section">
-          <div className="business-public-section-title"><div><span>PHOTOS & POSTS</span><h2>From the business</h2></div><button>See all</button></div>
-          <div className="business-public-gallery">{gallery.map((source, index) => <img key={`${source}-${index}`} src={source} alt={`${selected.name} post ${index + 1}`} />)}</div>
-        </section>
-
-        <section className="business-public-section business-reviews-section">
-          <div className="business-public-section-title"><div><span>CUSTOMER EXPERIENCES</span><h2>Ratings & reviews</h2></div><strong className="business-review-score"><Icon name="star" size={18} filled />{averageRating === null ? "No ratings" : averageRating.toFixed(1)}</strong></div>
-          <div className="business-review-composer">
-            <div className="thread-rating" aria-label="Your rating"><span>Your rating</span>{[1, 2, 3, 4, 5].map((star) => <button key={star} type="button" className={reviewRating !== null && star <= reviewRating ? "thread-star-active" : ""} onClick={() => setReviewRating(star)} aria-label={`${star} stars`}><Icon name="star" size={24} filled={reviewRating !== null && star <= reviewRating} /></button>)}</div>
-            <textarea value={reviewText} maxLength={1500} rows={3} onChange={(event) => setReviewText(event.target.value)} placeholder={`How was your experience with ${selected.name}?`} />
-            <div><small>{reviewText.length}/1500</small><button className="thread-publish" disabled={reviewPosting || reviewRating === null || reviewText.trim().length < 10} onClick={() => void publishReview()}>{reviewPosting ? <div className="spinner" /> : <Icon name="send" size={17} />}Post review</button></div>
-          </div>
-          {reviewError && <p className="error-text" role="alert">{reviewError}</p>}
-          {reviewsLoading ? <div className="thread-loading"><div className="spinner" /><span>Loading customer experiences...</span></div> : businessReviews.length === 0 ? <div className="business-reviews-empty"><Icon name="rate_review" size={27} /><strong>No reviews yet</strong><span>Be the first to share an experience with this business.</span></div> : <div className="business-review-list">{businessReviews.map((review) => <article key={review.id}><header><span className="thread-avatar">{review.authorAvatarUrl ? <img src={review.authorAvatarUrl} alt="" /> : review.authorName.charAt(0).toUpperCase()}</span><div><strong style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{review.authorName}<span className="review-nationality-badge" title={formatNationality(review.authorNationality, review.authorCountry)}>{countryToFlag(review.authorCountry, review.authorCountryIso2, review.authorNationality)} {formatNationality(review.authorNationality, review.authorCountry)}</span></strong><span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>{review.createdAt ? new Intl.DateTimeFormat("en-PH", { dateStyle: "medium" }).format(review.createdAt.toDate()) : "Posting now"}</span></div>{review.authorUid === user?.uid && <button onClick={() => setReviewDeleteTarget(review)} aria-label="Delete your review"><Icon name="delete" size={18} /></button>}</header>{review.rating !== null && <div className="business-review-stars">{[1, 2, 3, 4, 5].map((star) => <Icon key={star} name="star" size={17} filled={star <= review.rating!} />)}</div>}<p>{review.experience}</p></article>)}</div>}
-        </section>
-
-        {relatedBusinesses.length > 0 && <section className="explore-shelf business-related"><div className="explore-shelf-heading"><div><span>YOU MAY ALSO LIKE</span><h2>Similar businesses</h2></div></div><div className="explore-card-row">{relatedBusinesses.map((item) => <article className="explore-poster-card" key={item.id}><button className="explore-poster-main" onClick={() => { setSelected(item); document.querySelector(".app-content")?.scrollTo({ top: 0, behavior: "smooth" }); }}><span className="explore-poster-image-wrap"><img src={item.source} alt={item.name} className="explore-poster-image" /><small>{item.category.toUpperCase()}</small></span><span className="explore-poster-copy"><strong>{item.name}</strong><span>{item.subtitle}</span><em><Icon name="location_on" size={14} />{item.location || "Legazpi City"}</em></span></button></article>)}</div></section>}
-        <AppModal visible={inquiryOpen} title={`Message ${selected.name}`} onClose={() => !inquirySending && setInquiryOpen(false)}>
-          {inquirySent ? <div className="business-inquiry-success"><span><Icon name="mark_email_read" size={30} /></span><strong>Message sent</strong><p>{selected.name} will see your inquiry in their Hilinga business inbox.</p><Button label="Done" onPress={() => setInquiryOpen(false)} /></div> : <form className="business-inquiry-form" onSubmit={(event) => { event.preventDefault(); void submitInquiry(); }}><p>Ask about availability, reservations, services, or anything else you need to plan your visit.</p><label><span>Your message</span><textarea autoFocus value={inquiryMessage} maxLength={1500} rows={6} onChange={(event) => setInquiryMessage(event.target.value)} placeholder={`Hi ${selected.name}, I’d like to ask about…`} /></label><div><small>{inquiryMessage.length}/1500</small><Button label="Send message" loading={inquirySending} disabled={inquiryMessage.trim().length < 10} onPress={() => void submitInquiry()} /></div>{inquiryError && <p className="error-text" role="alert">{inquiryError}</p>}</form>}
-        </AppModal>
-        <ConfirmModal visible={reviewDeleteTarget !== null} title="Delete this review?" message="Your rating and comment will be permanently removed from this business profile." confirmLabel="Delete review" loading={reviewPosting} onCancel={() => !reviewPosting && setReviewDeleteTarget(null)} onConfirm={removeReview} />
-      </div>
-    );
-  }
-
-  if (collection) {
-    return (
-      <div className="screen explore-screen explore-collection-screen">
-        <header className="explore-collection-header"><button onClick={() => setCollection(null)} aria-label="Back to Explore"><Icon name="arrow_back" size={23} /></button><div><span>{collection.eyebrow}</span><h1>{collection.title}</h1><p>All {collectionItems.length} recommendations in this category.</p></div></header>
-        <div className="explore-collection-grid">
-          {collectionItems.map((item) => <article className="explore-collection-card" key={item.id}><button className="explore-collection-main" onClick={() => setSelected(item)}><img src={item.source} alt={item.name} /><span className="destination-kind">{item.kind === "Businesses" ? "BUSINESS" : item.kind.slice(0, -1).toUpperCase()}</span><div><small>{item.category}</small><h2>{item.name}</h2><p>{item.subtitle}</p><span><Icon name={item.kind === "Events" ? "event" : "location_on"} size={15} />{item.location || item.detail || "Legazpi & nearby"}</span></div></button><button className={`explore-collection-save ${savedIds.has(item.id) ? "saved" : ""}`} onClick={() => void toggleSaved(item)} aria-label={savedIds.has(item.id) ? `Remove ${item.name} from saved items` : `Save ${item.name}`}>{pendingId === item.id ? <div className="spinner" /> : <Icon name="favorite" size={20} filled={savedIds.has(item.id)} />}</button></article>)}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="screen explore-screen">
-      <header className="explore-topbar">
-        <nav aria-label="Explore views">{(["For you", "All", "Latest"] as ExploreView[]).map((value) => <button key={value} className={view === value ? "active" : ""} onClick={() => setView(value)}>{value}</button>)}</nav>
-        <button className="explore-search-button" onClick={() => document.getElementById("explore-search")?.focus()} aria-label="Search Explore"><Icon name="search" size={24} /></button>
-      </header>
-      <section className="explore-intro">
-        <span>DISCOVER LEGAZPI</span>
-        <h1>Find your next local favorite.</h1>
-        <p>Hotspots, homegrown businesses, major establishments, and experiences around the city.</p>
-        <div className="search-box explore-search-box"><Icon name="search" size={20} color="var(--c-muted)" /><input id="explore-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search places and businesses" aria-label="Search Explore" />{query && <button onClick={() => setQuery("")} aria-label="Clear search"><Icon name="cancel" size={20} color="var(--c-muted)" /></button>}</div>
-      </section>
-      <div className="chip-scroll explore-kind-filter" aria-label="Explore content types">
-        {(["All", "Places", "Businesses", "Events", "Experiences"] as ExploreKind[]).map((value) => <button key={value} className={`chip feed-kind-chip ${kind === value ? "chip-selected" : ""}`} onClick={() => setKind(value)}><Icon name={{ All: "apps", Places: "location_on", Businesses: "storefront", Events: "event", Experiences: "hiking" }[value]} size={17} />{value}</button>)}
-      </div>
-      {error && <p className="error-text" role="alert">{error}</p>}
-      {results.length === 0 ? (
-        <EmptyState icon="search" title="Nothing found" message="Try a different search, type, or interest." action="Clear filters" onAction={() => { setQuery(""); setFilter("All"); setKind("All"); }} />
-      ) : (
-        <div className="explore-results">
-          {renderShelf(query || filter !== "All" || kind !== "All" ? "Search results" : "Hotspots in Legazpi", "TRENDING NEAR YOU", results.filter((item) => query || filter !== "All" || kind !== "All" ? true : item.kind === "Places"))}
-          {!query && filter === "All" && kind === "All" && <aside className="explore-business-banner"><span><Icon name="storefront" size={25} /></span><div><strong>Local businesses belong here</strong><p>Profiles registered in Business mode are automatically showcased in Explore.</p></div><Icon name="verified" size={21} /></aside>}
-          {!query && filter === "All" && kind === "All" && renderShelf("Small businesses", "SHOP & SUPPORT LOCAL", results.filter((item) => item.businessScale === "Small business"))}
-          {!query && filter === "All" && kind === "All" && renderShelf("Big enterprises", "ESTABLISHED IN LEGAZPI", results.filter((item) => item.businessScale === "Big enterprise"))}
-          {!query && filter === "All" && kind === "All" && renderShelf("Events & experiences", "MORE TO DISCOVER", results.filter((item) => item.kind === "Events" || item.kind === "Experiences"))}
-          {!query && kind === "All" && <section className="explore-category-block"><div className="explore-shelf-heading"><div><span>BROWSE YOUR WAY</span><h2>Other categories</h2></div></div><div className="explore-category-grid">{[{ label: "Nature", icon: "landscape" }, { label: "Heritage", icon: "account_balance" }, { label: "Food", icon: "restaurant" }, { label: "Cafes", icon: "local_cafe" }, { label: "Shopping", icon: "shopping_bag" }, { label: "Activities", icon: "hiking" }].map((item) => <button key={item.label} className={filter === item.label ? "active" : ""} onClick={() => setFilter(item.label)}><span><Icon name={item.icon} size={22} /></span><strong>{item.label}</strong><Icon name="chevron_right" size={18} /></button>)}</div></section>}
-        </div>
-      )}
-      <AppModal visible={selected !== null} title={selected?.name ?? "Destination"} onClose={() => setSelected(null)}>
-        {selected && (
-          <>
-            <img src={selected.source} alt={selected.name} style={{ width: "100%", height: 210, borderRadius: 14, objectFit: "cover" }} />
-            <p style={{ color: "var(--c-body)", lineHeight: "21px" }}>{selected.subtitle}. Detailed descriptions, directions, opening hours, and live availability require a connected destination data service.</p>
-            <Button label={savedIds.has(selected.id) ? "Remove from saved" : `Save ${selected.kind.slice(0, -1).toLowerCase()}`} onPress={() => toggleSaved(selected)} loading={pendingId === selected.id} secondary={savedIds.has(selected.id)} />
-          </>
-        )}
-      </AppModal>
-    </div>
-  );
-}
-
-
 
 function Feed({ onOpenBusiness }: { onOpenBusiness: (businessId: string) => void }) {
   const { user } = useAuth();
@@ -1973,87 +848,25 @@ function ItineraryPreview({
   onExclude,
   onReplaceStop,
   budgetText,
+  title,
 }: {
   itinerary: ItineraryDay[];
   compact?: boolean;
   onExclude?: (title: string) => void;
   onReplaceStop?: (day: number, stopIndex: number, currentTitle: string) => void;
   budgetText?: string | number | null;
+  title?: string;
 }) {
-  const registeredBizNames = useMemo(() => {
-    const bizList = readVerifiedSmallBusinesses();
-    return new Set(bizList.map((biz) => biz.name.toLowerCase().trim()));
-  }, []);
-
-  const formattedBudget = useMemo(() => {
-    if (!budgetText) return "Moderate (₱700–₱1,500 / person)";
-    if (typeof budgetText === "number") return `₱${budgetText.toLocaleString()} Total Budget`;
-    if (budgetText === "Budget") return "₱300–₱700 per person / day (Budget)";
-    if (budgetText === "Moderate") return "₱700–₱1,500 per person / day (Moderate)";
-    if (budgetText === "Premium") return "₱1,500+ per person / day (Premium)";
-    return budgetText;
-  }, [budgetText]);
-
   return (
-    <div className={`itinerary-preview ${compact ? "itinerary-preview-compact" : ""}`}>
-      {!compact && (
-        <div className="itinerary-budget-banner">
-          <div className="itinerary-budget-icon">
-            <Icon name="account_balance_wallet" size={20} color="white" />
-          </div>
-          <div className="itinerary-budget-copy">
-            <span className="itinerary-budget-label">Trip Budget</span>
-            <strong>{formattedBudget}</strong>
-          </div>
-        </div>
-      )}
-      {itinerary.map((day) => (
-        <div className="itinerary-day" key={day.day}>
-          <div className="itinerary-day-heading"><span>Day {day.day}</span><strong>{day.title}</strong></div>
-          <div className="itinerary-timeline">
-            {day.stops.map((stop, stopIndex) => {
-              const isBiz = registeredBizNames.has(stop.title.toLowerCase().trim()) || stop.note.includes("registered Hilinga small business");
-              const priceMatch = stop.note.match(/₱[\d,]+(?:–₱[\d,]+|\+)?(?:\s*per\s*person)?/i);
-              return (
-                <div className="itinerary-stop" key={`${day.day}-${stopIndex}-${stop.title}`}>
-                  <div className="itinerary-stop-icon"><Icon name={stop.icon} size={17} color="var(--c-green)" /></div>
-                  <div className="itinerary-stop-copy">
-                    {stop.time && <span>{stop.time}</span>}
-                    {isBiz && (
-                      <span className="itinerary-business-badge">
-                        <Icon name="verified" size={13} color="var(--c-green)" filled /> Registered Local Business
-                      </span>
-                    )}
-                    <strong>{stop.title}</strong>
-                    {!compact && <p>{stop.note}</p>}
-                    {priceMatch && (
-                      <span className="stop-price-tag">
-                        <Icon name="sell" size={13} color="var(--c-green)" /> Estimated: {priceMatch[0]}
-                      </span>
-                    )}
-                    {(onReplaceStop || onExclude) && (
-                      <div className="itinerary-actions-row">
-                        {onReplaceStop && (
-                          <button type="button" className="itinerary-replace-btn" onClick={() => onReplaceStop(day.day, stopIndex, stop.title)}>
-                            <Icon name="swap_horiz" size={15} /> Replace place
-                          </button>
-                        )}
-                        {onExclude && (
-                          <button type="button" className="itinerary-exclude" onClick={() => onExclude(stop.title)}>
-                            <Icon name="remove_circle" size={15} /> Remove
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-      {!compact && <p className="itinerary-note"><Icon name="info" size={16} /> Suggested times are flexible. Check weather, opening hours, and local transport before leaving.</p>}
-    </div>
+    <PostcardTimeline
+      itinerary={itinerary}
+      compact={compact}
+      budgetText={budgetText}
+      title={title}
+      qrPayload={typeof window !== "undefined" ? window.location.href : undefined}
+      onExclude={onExclude}
+      onReplaceStop={onReplaceStop}
+    />
   );
 }
 
@@ -3171,7 +1984,7 @@ function ProfileScreen({ goPlanner, goExplore, onReset, businessMode }: { goPlan
           </section>
         </>
       )}
-      <AppModal visible={editorOpen} title="Edit profile" onClose={() => !saving && setEditorOpen(false)}>
+      <AppModal visible={editorOpen} title="Edit profile" onClose={() => !saving && setEditorOpen(false)} footer={<Button label="Save profile" onPress={saveProfile} loading={saving} />}>
         <div className="profile-editor-avatar">
           <div className="profile-editor-preview">
             {avatarSelection?.uri || avatarUrl ? <img src={avatarSelection?.uri ?? avatarUrl ?? ""} alt="Profile preview" /> : <span>{(draft.displayName || user?.email || "H").trim().charAt(0).toUpperCase()}</span>}
@@ -3198,7 +2011,6 @@ function ProfileScreen({ goPlanner, goExplore, onReset, businessMode }: { goPlan
         <Field label="Travel interests (optional)" value={interests} onChangeText={setInterests} placeholder="Food, nature, heritage" />
         <p className="profile-field-hint">Separate interests with commas to personalize recommendations.</p>
         {error && <p className="error-text" role="alert">{error}</p>}
-        <Button label="Save profile" onPress={saveProfile} loading={saving} />
       </AppModal>
       <AppModal visible={helpOpen} title="Help & support" onClose={() => setHelpOpen(false)}>
         <p style={{ color: "var(--c-body)", lineHeight: "22px" }}>Your account profile, saved places, and trip plans sync securely through Firebase and remain cached on this device when you are offline. Live bookings, alerts, and automatic itineraries still require additional services.</p>
@@ -3246,6 +2058,7 @@ export function HilingaApp() {
 }
 
 function HilingaAppShell() {
+  useNightMode();
   const db = useDatabase();
   const { activeTab, setActiveTab, visited } = useViewCache();
   const tab = activeTab as Tab;

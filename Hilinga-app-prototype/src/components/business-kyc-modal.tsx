@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  readRegisteredBusinesses,
   submitBusinessVerification,
   uploadVerificationDocument,
   type BusinessVerificationPayload,
