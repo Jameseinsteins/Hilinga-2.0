@@ -16,8 +16,9 @@ service-account*.json
 # build / deps
 dist/
 node_modules/
-tmp-env*
+tmp-*
 hilinga-env-decrypted*
+hilinga/
 
 # OS / editor
 .DS_Store
